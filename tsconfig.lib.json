@@ -1,0 +1,20 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": true,
+    "declarationMap": true,
+    "emitDeclarationOnly": true,
+    "outDir": "dist",
+    "rootDir": "src",
+    "stripInternal": true
+  },
+  "include": [
+    "src/index.ts",
+    "src/vite-env.d.ts",
+    "src/ocean/**/*.ts",
+    "src/loading/**/*.ts",
+    "src/rendering/**/*.ts"
+  ],
+  "exclude": ["src/**/*.test.ts"]
+}
