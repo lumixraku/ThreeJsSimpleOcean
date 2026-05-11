@@ -113,7 +113,7 @@ const { material, uniforms } = createOceanMaterial(textures, depthPass.depthText
 // Option 2: bind later / swap at runtime.
 setOceanShoreSdf(uniforms, shoreSdf);
 
-// Switch back to the AABB path at any time:
+// Switch back to the AABB path at any time (rebinds a safe internal fallback texture so you can dispose the old SDF immediately):
 setOceanShoreSdf(uniforms, null);
 
 // Dispose when no longer needed (e.g. before re-baking after geometry change).

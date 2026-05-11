@@ -254,8 +254,10 @@ export function createOceanMaterial(
  * Pass a {@link ShoreSdf} produced by `buildShoreSdf` to make the outer foam follow that geometry's
  * silhouette. Pass `null` to switch back to the rectangular `uIslandBounds` AABB path.
  *
- * When unbinding, the shared module fallback is re-bound so `uShoreSdf` never points at a texture
- * the caller may have already disposed.
+ * When unbinding, the shared module fallback is re-bound to `uShoreSdf` so it never keeps a pointer
+ * to a texture the caller may have disposed. `uShoreSdfBounds` and `uShoreSdfMaxDistance` are reset to
+ * the same defaults as {@link createOceanMaterial} (they are unused while `uUseShoreSdf` is 0, but
+ * this avoids stale values in debuggers and future shader edits).
  */
 export function setOceanShoreSdf(
   uniforms: OceanMaterialUniforms,
@@ -268,6 +270,8 @@ export function setOceanShoreSdf(
     uniforms.uUseShoreSdf.value = 1;
   } else {
     uniforms.uShoreSdf.value = getShoreSdfFallbackTexture();
+    uniforms.uShoreSdfBounds.value.set(-1, -1, 1, 1);
+    uniforms.uShoreSdfMaxDistance.value = 1;
     uniforms.uUseShoreSdf.value = 0;
   }
 }
