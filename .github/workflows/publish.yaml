@@ -1,0 +1,46 @@
+# Publish to npm using OpenID Connect (OIDC) — no long-lived NPM_TOKEN in GitHub secrets
+# when the package is linked to this workflow as a "Trusted Publisher" on npmjs.com.
+#
+# Triggers:
+# - workflow_dispatch: run manually from the Actions tab
+# - release (published): when you publish a GitHub Release (optional automation)
+#
+# Before this works: register this exact workflow path on npm (see README or npm docs).
+
+name: Publish to npm
+
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: npm-publish-${{ github.workflow }}-${{ github.event.release.tag_name || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: https://registry.npmjs.org
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Publish to npm
+        # prepack runs build:lib (see package.json)
+        run: npm publish --access public --provenance
