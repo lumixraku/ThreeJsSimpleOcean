@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import type { OceanTextureBundle } from "../loading/TextureBundleLoader";
+import type { ShoreSdf } from "./ShoreSdf";
 
 import oceanVert from "./shaders/ocean.vert.glsl?raw";
 import oceanFrag from "./shaders/ocean.frag.glsl?raw";
@@ -31,6 +32,14 @@ export type OceanMaterialUniforms = {
   uFoamMaskScroll: THREE.IUniform<THREE.Vector2>;
   uFoamMaskThreshold: THREE.IUniform<number>;
   uIslandBounds: THREE.IUniform<THREE.Vector4>;
+  /** Baked shore distance field (RGBA8; R = clamped normalized distance from land). Bound to a 1x1 black fallback when unused. */
+  uShoreSdf: THREE.IUniform<THREE.Texture | null>;
+  /** World XZ rectangle the SDF covers (minX, minZ, maxX, maxZ). */
+  uShoreSdfBounds: THREE.IUniform<THREE.Vector4>;
+  /** World-unit distance represented by R == 1.0 in `uShoreSdf`. */
+  uShoreSdfMaxDistance: THREE.IUniform<number>;
+  /** 0 → use the AABB foam path; 1 → sample `uShoreSdf` instead. Set automatically by {@link setOceanShoreSdf}. */
+  uUseShoreSdf: THREE.IUniform<number>;
   uFoamShapeNoiseAmount: THREE.IUniform<number>;
   uFoamShapeNoiseScale: THREE.IUniform<number>;
   uFoamShapeNoiseScroll: THREE.IUniform<THREE.Vector2>;
@@ -92,6 +101,12 @@ export type OceanMaterialConfig = {
   specStrength: number;
   /** Strength of fresnel rim at glancing angles. */
   fresnelStrength: number;
+  /**
+   * Optional baked shore distance field (see {@link buildShoreSdf}). When provided, the outer foam
+   * follows the actual coastline of any geometry instead of an XZ AABB. Can also be set later via
+   * {@link setOceanShoreSdf}.
+   */
+  shoreSdf?: ShoreSdf;
 };
 
 /**
@@ -139,12 +154,30 @@ const defaultConfig: OceanMaterialConfig = {
   fresnelStrength: 0.28,
 };
 
+/**
+ * 1x1 black RGBA8 texture used as a safe default for `uShoreSdf` when no SDF is bound.
+ * Sampling this with any UV returns 0, so the AABB path stays in control via `uUseShoreSdf == 0`.
+ */
+function createShoreSdfFallback(): THREE.DataTexture {
+  const tex = new THREE.DataTexture(
+    new Uint8Array([0, 0, 0, 255]),
+    1,
+    1,
+    THREE.RGBAFormat,
+    THREE.UnsignedByteType,
+  );
+  tex.needsUpdate = true;
+  return tex;
+}
+
 export function createOceanMaterial(
   textures: OceanTextureBundle,
   depthTexture: THREE.DepthTexture,
   config: Partial<OceanMaterialConfig> = {},
 ): { material: THREE.RawShaderMaterial; uniforms: OceanMaterialUniforms } {
   const c = { ...defaultConfig, ...config };
+
+  const shoreSdfFallback = createShoreSdfFallback();
 
   const uniforms: OceanMaterialUniforms = {
     uHeightMap: { value: textures.height },
@@ -173,6 +206,10 @@ export function createOceanMaterial(
     uFoamMaskScroll: { value: c.foamMaskScroll.clone() },
     uFoamMaskThreshold: { value: c.foamMaskThreshold },
     uIslandBounds: { value: new THREE.Vector4(-1, -1, 1, 1) },
+    uShoreSdf: { value: shoreSdfFallback },
+    uShoreSdfBounds: { value: new THREE.Vector4(-1, -1, 1, 1) },
+    uShoreSdfMaxDistance: { value: 1 },
+    uUseShoreSdf: { value: 0 },
     uFoamShapeNoiseAmount: { value: c.foamShapeNoiseAmount },
     uFoamShapeNoiseScale: { value: c.foamShapeNoiseScale },
     uFoamShapeNoiseScroll: { value: c.foamShapeNoiseScroll.clone() },
@@ -202,7 +239,32 @@ export function createOceanMaterial(
     side: THREE.FrontSide,
   });
 
+  if (c.shoreSdf) setOceanShoreSdf(uniforms, c.shoreSdf);
+
   return { material, uniforms };
+}
+
+/**
+ * Bind (or unbind) a baked shore distance field to an ocean material's uniforms.
+ *
+ * Pass a {@link ShoreSdf} produced by `buildShoreSdf` to make the outer foam follow that geometry's
+ * silhouette. Pass `null` to switch back to the rectangular `uIslandBounds` AABB path.
+ *
+ * The ocean material keeps a 1x1 black fallback texture bound when no SDF is set, so the sampler is
+ * always valid on the GPU even after unbinding.
+ */
+export function setOceanShoreSdf(
+  uniforms: OceanMaterialUniforms,
+  shoreSdf: ShoreSdf | null,
+): void {
+  if (shoreSdf) {
+    uniforms.uShoreSdf.value = shoreSdf.texture;
+    uniforms.uShoreSdfBounds.value.copy(shoreSdf.bounds);
+    uniforms.uShoreSdfMaxDistance.value = shoreSdf.maxDistance;
+    uniforms.uUseShoreSdf.value = 1;
+  } else {
+    uniforms.uUseShoreSdf.value = 0;
+  }
 }
 
 /**

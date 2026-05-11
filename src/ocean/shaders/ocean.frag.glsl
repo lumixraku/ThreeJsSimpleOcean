@@ -24,7 +24,11 @@ uniform float uFoamStrength;
 uniform float uFoamMaskTiling;
 uniform vec2 uFoamMaskScroll;
 uniform float uFoamMaskThreshold;
-uniform vec4 uIslandBounds; // (minX, minZ, maxX, maxZ) — XZ AABB of the island footprint
+uniform vec4 uIslandBounds; // (minX, minZ, maxX, maxZ) — XZ AABB of the island footprint (AABB foam path)
+uniform sampler2D uShoreSdf;        // baked top-down shore distance field (R = normalized distance from land)
+uniform vec4 uShoreSdfBounds;       // (minX, minZ, maxX, maxZ) — world XZ rectangle the SDF covers
+uniform float uShoreSdfMaxDistance; // world units that map to R == 1.0 in the SDF
+uniform float uUseShoreSdf;         // 0 = AABB path, 1 = sample uShoreSdf instead
 uniform float uFoamShapeNoiseAmount; // strength of the random perturbation of the OUTER band's outer edge (world units)
 uniform float uFoamShapeNoiseScale;  // world-XZ frequency of the shape perturbation noise
 uniform vec2 uFoamShapeNoiseScroll;  // drift of the shape noise (slow morph)
@@ -119,12 +123,23 @@ void main() {
   vec3 color = mix(surface, uDeepColor, depthT * uDepthTintAmount);
 
   // === FOAM ===
-  // View-angle independent: world-space horizontal distance from this water pixel
-  // to the island's XZ footprint. >0 outside, <=0 inside (under the mesh).
+  // View-angle independent: world-space horizontal distance from this water pixel to the actual shore.
+  //
+  //   uUseShoreSdf == 1 → sample a pre-baked top-down distance field. Hugs any silhouette
+  //                       (peninsulas, bays, archipelagos, jagged tile coasts). Recommended.
+  //   uUseShoreSdf == 0 → fall back to a single XZ AABB. Cheap, fine for rectangular islands,
+  //                       but produces a rectangular foam band around irregular geometry.
   vec2 xz = vWorldPos.xz;
-  float dx = max(uIslandBounds.x - xz.x, xz.x - uIslandBounds.z);
-  float dz = max(uIslandBounds.y - xz.y, xz.y - uIslandBounds.w);
-  float distOutsideIsland = max(dx, dz);
+  float distOutsideIsland;
+  if (uUseShoreSdf > 0.5) {
+    vec2 sdfUv = (xz - uShoreSdfBounds.xy) / max(uShoreSdfBounds.zw - uShoreSdfBounds.xy, vec2(1e-6));
+    sdfUv = clamp(sdfUv, 0.0, 1.0);
+    distOutsideIsland = texture2D(uShoreSdf, sdfUv).r * uShoreSdfMaxDistance;
+  } else {
+    float dx = max(uIslandBounds.x - xz.x, xz.x - uIslandBounds.z);
+    float dz = max(uIslandBounds.y - xz.y, xz.y - uIslandBounds.w);
+    distOutsideIsland = max(dx, dz);
+  }
 
   // ============================================================
   // FOAM — two fully independent layers, combined with max().

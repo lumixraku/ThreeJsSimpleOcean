@@ -3,7 +3,8 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 
 import { AssetPaths } from "../config/AssetPaths";
 import { loadOceanTextures, type OceanTextureBundle } from "../loading/TextureBundleLoader";
-import { createOceanMaterial } from "../ocean/OceanMaterial";
+import { createOceanMaterial, setOceanShoreSdf } from "../ocean/OceanMaterial";
+import { buildShoreSdf, type ShoreSdf } from "../ocean/ShoreSdf";
 import { BlitPass } from "../rendering/BlitPass";
 import { DepthPrePassTarget } from "../rendering/DepthPrePassTarget";
 import { renderFrame } from "../rendering/FrameRenderer";
@@ -35,6 +36,7 @@ export class OceanApplication {
   private oceanUniforms!: ReturnType<typeof createOceanMaterial>["uniforms"];
   private oceanTextures: OceanTextureBundle | null = null;
   private grassDispose: (() => void) | null = null;
+  private shoreSdf: ShoreSdf | null = null;
 
   constructor(private readonly mount: HTMLElement) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
@@ -46,7 +48,7 @@ export class OceanApplication {
     mount.appendChild(this.renderer.domElement);
 
     this.camera = new THREE.PerspectiveCamera(55, mount.clientWidth / mount.clientHeight, 0.1, 200);
-    this.camera.position.set(7.5, 5.2, 9.2);
+    this.camera.position.set(12, 8, 13);
 
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.target.set(0, SceneLayout.waterY, 0);
@@ -70,9 +72,13 @@ export class OceanApplication {
     const texLoader = new THREE.TextureLoader();
     this.oceanTextures = await loadOceanTextures(texLoader, AssetPaths.ocean, 4);
 
+    // Load one grass tile, then clone-place it into an irregular layout. This is what makes the
+    // demo a useful reference for the shore SDF: an AABB would draw a rectangular foam band around
+    // this L-shape, while the SDF wraps the actual coastline of every tile.
     const grass = await this.tryLoadGrass();
     this.grassDispose = grass.dispose;
-    this.opaqueScene.add(grass.root);
+    const islandRoot = this.buildIslandLayout(grass.root);
+    this.opaqueScene.add(islandRoot);
 
     const floor = this.buildOceanFloor();
     this.opaqueScene.add(floor);
@@ -83,10 +89,18 @@ export class OceanApplication {
     const { material, uniforms } = createOceanMaterial(this.oceanTextures, this.depthPass.depthTexture);
     this.oceanUniforms = uniforms;
 
-    // Tell the water shader the XZ footprint of the island so foam can wrap around its edge
-    // in world space (view-angle independent).
-    const islandBounds = computeTileBoundsXZ(grass.root, 0);
+    // AABB fallback for the foam shader. Used when no shore SDF is bound.
+    const islandBounds = computeTileBoundsXZ(islandRoot, 0);
     this.oceanUniforms.uIslandBounds.value.copy(islandBounds);
+
+    // Bake a top-down shore distance field so the outer foam hugs the actual coastline of the
+    // grass mesh (cliff edges, gaps, corners) instead of a single rectangular bounding box.
+    this.shoreSdf = buildShoreSdf(this.renderer, {
+      object: islandRoot,
+      padding: 8,
+      resolution: 256,
+    });
+    setOceanShoreSdf(this.oceanUniforms, this.shoreSdf);
 
     this.oceanMesh = new THREE.Mesh(oceanGeometry, material);
     this.oceanMesh.rotation.x = -Math.PI / 2;
@@ -96,6 +110,38 @@ export class OceanApplication {
 
     this.onResize();
     this.renderer.setAnimationLoop(this.tick);
+  }
+
+  /**
+   * Place the loaded grass tile (and clones of it) into an irregular L-shape so the demo exercises
+   * the shore SDF. The original tile is normalized to ~4×4 in {@link GrassTileLoader}, so we offset
+   * each placement by integer multiples of the tile size.
+   */
+  private buildIslandLayout(template: THREE.Object3D): THREE.Object3D {
+    const TILE = 4;
+    const offsets: Array<[number, number]> = [
+      [0, 0],
+      [1, 0],
+      [0, 1],
+      [0, 2],
+      [1, 2],
+    ];
+
+    const group = new THREE.Group();
+    for (let i = 0; i < offsets.length; i++) {
+      const [tx, tz] = offsets[i];
+      // First placement reuses the original (so grassDispose works without tracking clones).
+      const node = i === 0 ? template : template.clone(true);
+      const placement = new THREE.Group();
+      placement.position.set(tx * TILE, 0, tz * TILE);
+      placement.add(node);
+      group.add(placement);
+    }
+
+    // Recenter the layout on the world origin for nicer camera framing.
+    const box = new THREE.Box3().setFromObject(group);
+    group.position.set(-(box.min.x + box.max.x) * 0.5, 0, -(box.min.z + box.max.z) * 0.5);
+    return group;
   }
 
   private buildOceanFloor(): THREE.Mesh {
@@ -153,6 +199,7 @@ export class OceanApplication {
     this.controls.dispose();
     this.depthPass.dispose();
     this.blitPass.dispose();
+    this.shoreSdf?.dispose();
     this.grassDispose?.();
 
     if (this.oceanMesh) {

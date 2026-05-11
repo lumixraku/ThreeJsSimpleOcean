@@ -78,28 +78,78 @@ function tick() {
 
 If texture URLs fail to load, `loadOceanTextures` **falls back to small procedural placeholders** so you can integrate the pipeline before wiring real files.
 
-### Island foam bounds
+### Shoreline foam — rectangular islands (`uIslandBounds`)
 
-For foam that hugs an island mesh in world XZ, set:
+For a rectangular island, set the XZ AABB once:
 
 ```ts
 uniforms.uIslandBounds.value.set(minX, minZ, maxX, maxZ);
 ```
 
-Defaults cover a small area around the origin when you omit this.
+This is fastest (no extra texture, no bake) but produces a rectangular foam band around any non-rectangular geometry.
+
+### Shoreline foam — any shape (`buildShoreSdf`)
+
+For an irregular coast (peninsulas, bays, tile-based islands, archipelagos), use the baked **shore distance field**. The shader samples a top-down SDF so the outer patchy foam follows the actual silhouette, exactly like the thin inner ring does:
+
+```ts
+import {
+  buildShoreSdf,
+  createOceanMaterial,
+  setOceanShoreSdf,
+} from "threejs-simple-ocean";
+
+// Build your scene first, then bake the SDF once the island is in its final pose.
+const shoreSdf = buildShoreSdf(renderer, {
+  object: islandRoot,   // any Object3D; every mesh in its subtree counts as land
+  padding: 8,           // world-unit headroom past the silhouette (= max foam reach by default)
+  resolution: 256,      // square texture side; 256–512 is a good range
+  // maxDistance: 8,    // optional: defaults to `padding`. Set lower for a tighter foam radius.
+});
+
+// Option 1: bind at material creation time.
+const { material, uniforms } = createOceanMaterial(textures, depthPass.depthTexture, { shoreSdf });
+
+// Option 2: bind later / swap at runtime.
+setOceanShoreSdf(uniforms, shoreSdf);
+
+// Switch back to the AABB path at any time:
+setOceanShoreSdf(uniforms, null);
+
+// Dispose when no longer needed (e.g. before re-baking after geometry change).
+shoreSdf.dispose();
+```
+
+#### How it works
+
+1. `buildShoreSdf` renders `object` top-down with a flat white override material into an RGBA8 RT.
+2. The pixels are read back and an exact 2D Euclidean distance transform (Felzenszwalb 2004) runs on the CPU.
+3. The result is encoded into a `DataTexture` where `R = clamp(distanceFromShore / maxDistance, 0, 1)`, sampled in the fragment shader as `texture2D(uShoreSdf, (worldXZ - bounds.xy) / boundsSize)`.
+
+Cost: a one-time GPU readback (~3–10ms at 256², ~10–30ms at 512²) plus one extra texture sample per water pixel at render time.
+
+#### Tuning tips
+
+- **`padding` / `maxDistance` set the maximum foam reach** in world units. The foam `foamWidth` knob still controls how far the patchy band actually extends, but if you set `foamWidth` larger than `maxDistance` the SDF clamps and the outer edge becomes flat. Keep `maxDistance >= foamWidth + foamBaseRingWidth + foamShapeNoiseAmount * foamWidth` for organic edges.
+- **`resolution` controls foam edge sharpness.** 256² is usually enough because the patchy mask and shape noise hide aliasing. Bump to 512² if you see stepped/blocky boundaries on long flat coasts.
+- **Re-bake when the island changes.** `buildShoreSdf` is safe to call again at runtime (e.g. after adding/removing tiles). Dispose the old SDF first.
+- **Object placement matters.** Bake AFTER the island has its final world transform — the SDF stores absolute world XZ coordinates via `shoreSdf.bounds`. If you move the island later, re-bake.
+- **Use a subtree, not the whole scene.** Pass only the geometry that should count as "land". Floors, skyboxes, props, etc. should be excluded.
 
 ## Public API
 
 | Export | Role |
 |--------|------|
-| `createOceanMaterial` | Builds `RawShaderMaterial` + uniform bag from textures and a shared `DepthTexture`. |
+| `createOceanMaterial` | Builds `RawShaderMaterial` + uniform bag from textures and a shared `DepthTexture`. Accepts an optional `shoreSdf`. |
 | `bindOceanMatrices` | Per-frame camera/mesh matrices (also called from `renderFrame`). |
+| `buildShoreSdf` | Bake a top-down shore distance field so foam follows the actual coastline of any geometry. |
+| `setOceanShoreSdf` | Bind / unbind a `ShoreSdf` on an existing material at runtime. |
 | `loadOceanTextures` | Loads and configures repeat/anisotropy; **placeholders on failure**. |
 | `DepthPrePassTarget` | Color+depth render target whose `depthTexture` the shader samples. |
 | `BlitPass` | Full-screen blit utility (required by `renderFrame` context; optional for your own experiments). |
 | `renderFrame` | Opaque pre-pass → screen opaque → transparent water with correct depth testing. |
 
-Types: `OceanMaterialConfig`, `OceanMaterialUniforms`, `OceanTextureBundle`, `FrameRenderContext`.
+Types: `OceanMaterialConfig`, `OceanMaterialUniforms`, `OceanTextureBundle`, `FrameRenderContext`, `ShoreSdf`, `BuildShoreSdfOptions`.
 
 ## Bundler note
 
