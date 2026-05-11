@@ -1,5 +1,5 @@
 {
-  "name": "ocean-simple",
+  "name": "threejs-simple-ocean",
   "version": "0.1.0",
   "description": "Three.js ocean surface shader (depth-aware foam, scrolling normals) with a small render-pipeline helper.",
   "type": "module",

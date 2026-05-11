@@ -1,4 +1,4 @@
-# Ocean Simple
+# Three.js Simple Ocean
 
 Three.js **ocean surface** material: scrolling height and normal maps, depth-aware absorption, and shoreline foam. Includes a small **render helper** that matches what the shader expects (opaque depth pre-pass + transparent water pass).
 
@@ -9,7 +9,7 @@ I just use a small amount in a fairly light game.
 ## Install
 
 ```bash
-npm install ocean-simple three
+npm install threejs-simple-ocean three
 ```
 
 `three` is a **peer dependency** — use a compatible version (see `peerDependencies` in [package.json](package.json)).
