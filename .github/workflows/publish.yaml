@@ -5,9 +5,8 @@
 # - workflow_dispatch: run manually from the Actions tab
 # - release (published): when you publish a GitHub Release (optional automation)
 #
-# Before this works: register this exact workflow path on npm (see README or npm docs).
-# First-ever version of a new package name usually must be published once with `npm login`
-# locally; OIDC then publishes subsequent versions (see README "E404" note).
+# Before this works: register this exact workflow path on npm (see docs/maintainers.md).
+# If publish returns E404, see docs/maintainers.md (environment, workflow file, secrets).
 
 name: Publish to npm
 
@@ -27,6 +26,9 @@ concurrency:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    # If npm "Trusted Publisher" was set up WITH a GitHub Environment, uncomment and set
+    # the name to match npm EXACTLY (case-sensitive). Leave commented if npm has no environment.
+    environment: npm
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -44,5 +46,6 @@ jobs:
         run: npm run typecheck
 
       - name: Publish to npm
-        # prepack runs build:lib (see package.json)
+        # prepack runs build:lib (see package.json). Do not set NODE_AUTH_TOKEN here:
+        # a repo/org secret with that name overrides OIDC and breaks trusted publishing.
         run: npm publish --access public --provenance

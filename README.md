@@ -117,27 +117,6 @@ The library ships as **ESM** (`dist/index.js`). Shader sources are bundled at bu
 
 The full-screen demo (grass island, FBX, Siegebound asset paths) lives in the root app. Those assets are **examples only** and are not part of the npm API.
 
-## Scripts (maintainers)
-
-| Command | Description |
-|---------|-------------|
-| `npm run dev` | Vite dev server for the **root demo** (`index.html`). |
-| `npm run build:lib` | Build ESM + `.d.ts` into `dist/` for publishing. |
-| `npm run build:demo` | Typecheck + build the demo site to `dist-demo/`. |
-| `npm run typecheck` | Typecheck the whole `src/` tree. |
-| `npm run build` | Alias for `build:demo`. |
-
-`prepack` runs `build:lib` so `npm publish` ships a fresh `dist/`.
-
-### Try the minimal consumer example
-
-```bash
-npm run build:lib
-cd examples/minimal
-npm install
-npm run dev
-```
-
 ## License
 
 MIT
