@@ -12,7 +12,7 @@ I just use a small amount in a fairly light game.
 npm install threejs-simple-ocean three
 ```
 
-`three` is a **peer dependency** — use a compatible version (see `peerDependencies` in [package.json](package.json)).
+`three` is a **peer dependency** — use a compatible version (see `peerDependencies` in [package.json](https://github.com/sam-thewise/ThreeJsSimpleOcean/blob/master/package.json)).
 
 ## Quick start
 
@@ -26,7 +26,7 @@ import {
   DepthPrePassTarget,
   loadOceanTextures,
   renderFrame,
-} from "ocean-simple";
+} from "threejs-simple-ocean";
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 const camera = new THREE.PerspectiveCamera(55, width / height, 0.1, 200);
@@ -109,11 +109,11 @@ The library ships as **ESM** (`dist/index.js`). Shader sources are bundled at bu
 
 | Path | Purpose |
 |------|---------|
-| [src/index.ts](src/index.ts) | Package entry (public exports). |
-| [src/ocean/OceanMaterial.ts](src/ocean/OceanMaterial.ts) | Shader material and defaults. |
-| [src/rendering/FrameRenderer.ts](src/rendering/FrameRenderer.ts) | `renderFrame` pipeline. |
-| [src/app/OceanApplication.ts](src/app/OceanApplication.ts) | **Demo app only** — not exported from the package. |
-| [examples/minimal](examples/minimal) | Standalone minimal Vite example using `file:../..`. |
+| [src/index.ts](https://github.com/sam-thewise/ThreeJsSimpleOcean/blob/master/src/index.ts) | Package entry (public exports). |
+| [src/ocean/OceanMaterial.ts](https://github.com/sam-thewise/ThreeJsSimpleOcean/blob/master/src/ocean/OceanMaterial.ts) | Shader material and defaults. |
+| [src/rendering/FrameRenderer.ts](https://github.com/sam-thewise/ThreeJsSimpleOcean/blob/master/src/rendering/FrameRenderer.ts) | `renderFrame` pipeline. |
+| [src/app/OceanApplication.ts](https://github.com/sam-thewise/ThreeJsSimpleOcean/blob/master/src/app/OceanApplication.ts) | **Demo app only** — not exported from the package. |
+| [examples/minimal](https://github.com/sam-thewise/ThreeJsSimpleOcean/tree/master/examples/minimal) | Standalone minimal Vite example using `file:../..`. |
 
 The full-screen demo (grass island, FBX, Siegebound asset paths) lives in the root app. Those assets are **examples only** and are not part of the npm API.
 
