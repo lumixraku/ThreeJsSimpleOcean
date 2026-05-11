@@ -42,7 +42,8 @@ export type ShoreSdf = {
  *
  * Pipeline:
  *   1. Pick / auto-derive a square XZ rectangle around `object` (extends shorter axis so pixels are isotropic).
- *   2. Render the object silhouette top-down with a flat white material into an RGBA8 RT.
+ *   2. Deep-clone `object`, render its silhouette top-down with a flat white material into an RGBA8 RT
+ *      (the live scene graph is never reparented).
  *   3. Run an exact 2D Euclidean distance transform on the CPU (Felzenszwalb & Huttenlocher 2004).
  *   4. Encode `clamp(distanceWorld / maxDistance, 0, 1)` into a `DataTexture`.
  *
@@ -139,6 +140,10 @@ function clampByte(v: number): number {
 /**
  * Render `object` top-down with a flat white material into a `resolution²` RGBA8 RT and read back pixels.
  *
+ * Uses a **deep clone** of `object` under a throwaway scene so the live scene graph is never
+ * reparented (no ordering changes, no risk of leaving the source detached if something throws).
+ * Geometries and materials are shared with the original where Three's `clone(true)` does so.
+ *
  * Convention: returned `Uint8Array` is laid out so that the row index increases with world +Z and the
  * column index increases with world +X. This way uploading it as a `DataTexture` and sampling with
  * `uv = (worldXZ - bounds.xy) / (bounds.zw - bounds.xy)` requires no flip in the shader.
@@ -159,16 +164,16 @@ function renderSilhouette(
   const overrideMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
   tempScene.overrideMaterial = overrideMat;
 
-  const originalParent = object.parent;
-  // `attach` preserves world transform when reparenting.
-  tempScene.attach(object);
+  const clone = object.clone(true);
+  tempScene.add(clone);
+  clone.updateMatrixWorld(true);
 
   const halfW = (bounds.z - bounds.x) * 0.5;
   const halfH = (bounds.w - bounds.y) * 0.5;
   const cx = (bounds.x + bounds.z) * 0.5;
   const cz = (bounds.y + bounds.w) * 0.5;
 
-  const worldBox = new THREE.Box3().setFromObject(object);
+  const worldBox = new THREE.Box3().setFromObject(clone);
   const top = worldBox.max.y + 10;
   const depth = Math.max(1, top - (worldBox.min.y - 10));
 
@@ -188,31 +193,34 @@ function renderSilhouette(
 
   const prevTarget = renderer.getRenderTarget();
   const prevAutoClear = renderer.autoClear;
-  renderer.autoClear = true;
-  renderer.setRenderTarget(rt);
-  renderer.clear(true, true, true);
-  renderer.render(tempScene, cam);
-  renderer.setRenderTarget(prevTarget);
-  renderer.autoClear = prevAutoClear;
 
-  const fb = new Uint8Array(resolution * resolution * 4);
-  renderer.readRenderTargetPixels(rt, 0, 0, resolution, resolution, fb);
+  let flipped: Uint8Array;
+  try {
+    renderer.autoClear = true;
+    renderer.setRenderTarget(rt);
+    renderer.clear(true, true, true);
+    renderer.render(tempScene, cam);
 
-  // GL framebuffer row 0 is the BOTTOM of the image (=> world +Z with our up vector).
-  // Flip so data row 0 corresponds to world -Z. Then DataTexture upload + plain UV sampling
-  // gives uv.y = (worldZ - minZ) / (maxZ - minZ) with no extra work in the shader.
-  const flipped = new Uint8Array(resolution * resolution * 4);
-  const stride = resolution * 4;
-  for (let row = 0; row < resolution; row++) {
-    const srcRow = resolution - 1 - row;
-    flipped.set(fb.subarray(srcRow * stride, srcRow * stride + stride), row * stride);
+    const fb = new Uint8Array(resolution * resolution * 4);
+    renderer.readRenderTargetPixels(rt, 0, 0, resolution, resolution, fb);
+
+    // GL framebuffer row 0 is the BOTTOM of the image (=> world +Z with our up vector).
+    // Flip so data row 0 corresponds to world -Z. Then DataTexture upload + plain UV sampling
+    // gives uv.y = (worldZ - minZ) / (maxZ - minZ) with no extra work in the shader.
+    flipped = new Uint8Array(resolution * resolution * 4);
+    const stride = resolution * 4;
+    for (let row = 0; row < resolution; row++) {
+      const srcRow = resolution - 1 - row;
+      flipped.set(fb.subarray(srcRow * stride, srcRow * stride + stride), row * stride);
+    }
+  } finally {
+    renderer.setRenderTarget(prevTarget);
+    renderer.autoClear = prevAutoClear;
+    rt.dispose();
+    tempScene.overrideMaterial = null;
+    overrideMat.dispose();
+    tempScene.remove(clone);
   }
-
-  rt.dispose();
-  tempScene.overrideMaterial = null;
-  overrideMat.dispose();
-  if (originalParent) originalParent.attach(object);
-  else tempScene.remove(object);
 
   return flipped;
 }

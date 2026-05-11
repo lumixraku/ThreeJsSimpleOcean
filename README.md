@@ -122,7 +122,7 @@ shoreSdf.dispose();
 
 #### How it works
 
-1. `buildShoreSdf` renders `object` top-down with a flat white override material into an RGBA8 RT.
+1. `buildShoreSdf` **deep-clones** `object` into a throwaway scene (your live graph is never reparented), then renders that clone top-down with a flat white override material into an RGBA8 RT.
 2. The pixels are read back and an exact 2D Euclidean distance transform (Felzenszwalb 2004) runs on the CPU.
 3. The result is encoded into a `DataTexture` where `R = clamp(distanceFromShore / maxDistance, 0, 1)`, sampled in the fragment shader as `texture2D(uShoreSdf, (worldXZ - bounds.xy) / boundsSize)`.
 
@@ -135,6 +135,7 @@ Cost: a one-time GPU readback (~3–10ms at 256², ~10–30ms at 512²) plus one
 - **Re-bake when the island changes.** `buildShoreSdf` is safe to call again at runtime (e.g. after adding/removing tiles). Dispose the old SDF first.
 - **Object placement matters.** Bake AFTER the island has its final world transform — the SDF stores absolute world XZ coordinates via `shoreSdf.bounds`. If you move the island later, re-bake.
 - **Use a subtree, not the whole scene.** Pass only the geometry that should count as "land". Floors, skyboxes, props, etc. should be excluded.
+- **Skinned / animated meshes:** the bake uses `Object3D.clone(true)`. Rigid hierarchies and static meshes match the on-screen silhouette. **SkinnedMesh** clones may not reproduce the current animation pose (skeleton binding, bone matrices, and morph targets can differ from the live object), so the SDF silhouette can be wrong for animated characters or rigs. For shoreline foam, pass **static** land geometry (baked/rest pose, or a merged mesh). If you need a posed skinned mesh, bake from a dedicated static copy or merge the skinned result to a non-skinned mesh first.
 
 ## Public API
 
