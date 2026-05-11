@@ -108,6 +108,17 @@ export function buildShoreSdf(
 
 function defaultBoundsFor(object: THREE.Object3D, padding: number): THREE.Vector4 {
   const box = new THREE.Box3().setFromObject(object);
+  if (
+    box.isEmpty() ||
+    !Number.isFinite(box.min.x) ||
+    !Number.isFinite(box.min.z) ||
+    !Number.isFinite(box.max.x) ||
+    !Number.isFinite(box.max.z)
+  ) {
+    throw new Error(
+      "buildShoreSdf could not derive bounds from options.object. Provide options.bounds explicitly or ensure the object subtree contains geometry with valid bounds.",
+    );
+  }
   return new THREE.Vector4(
     box.min.x - padding,
     box.min.z - padding,
