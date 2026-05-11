@@ -8,7 +8,7 @@
     "build": "vite build"
   },
   "dependencies": {
-    "ocean-simple": "file:../..",
+    "threejs-simple-ocean": "file:../..",
     "three": "^0.164.1"
   },
   "devDependencies": {

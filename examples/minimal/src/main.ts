@@ -6,7 +6,7 @@ import {
   DepthPrePassTarget,
   loadOceanTextures,
   renderFrame,
-} from "ocean-simple";
+} from "threejs-simple-ocean";
 
 const waterY = 1.5;
 const floorY = -2.0;

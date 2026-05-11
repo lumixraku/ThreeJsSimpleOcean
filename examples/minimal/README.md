@@ -1,6 +1,6 @@
 # Minimal example
 
-Consumes the published-style `ocean-simple` package from the repo root (`file:../..`).
+Consumes the published-style `threejs-simple-ocean` package from the repo root (`file:../..`).
 
 ## Prerequisite
 

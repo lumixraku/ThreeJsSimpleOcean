@@ -6,6 +6,8 @@
 # - release (published): when you publish a GitHub Release (optional automation)
 #
 # Before this works: register this exact workflow path on npm (see README or npm docs).
+# First-ever version of a new package name usually must be published once with `npm login`
+# locally; OIDC then publishes subsequent versions (see README "E404" note).
 
 name: Publish to npm
 
