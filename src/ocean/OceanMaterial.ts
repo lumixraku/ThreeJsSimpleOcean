@@ -32,7 +32,7 @@ export type OceanMaterialUniforms = {
   uFoamMaskScroll: THREE.IUniform<THREE.Vector2>;
   uFoamMaskThreshold: THREE.IUniform<number>;
   uIslandBounds: THREE.IUniform<THREE.Vector4>;
-  /** Baked shore distance field (RGBA8; R = clamped normalized distance from land). Bound to a 1x1 black fallback when unused. */
+  /** Baked shore distance field (RGBA8; R = clamped normalized distance from land). Uses a shared 1×1 black fallback when unused. */
   uShoreSdf: THREE.IUniform<THREE.Texture | null>;
   /** World XZ rectangle the SDF covers (minX, minZ, maxX, maxZ). */
   uShoreSdfBounds: THREE.IUniform<THREE.Vector4>;
@@ -154,20 +154,26 @@ const defaultConfig: OceanMaterialConfig = {
   fresnelStrength: 0.28,
 };
 
+/** Shared 1x1 black RGBA8 fallback for `uShoreSdf` — one GPU allocation for all ocean materials. */
+let shoreSdfFallbackTexture: THREE.DataTexture | null = null;
+
 /**
- * 1x1 black RGBA8 texture used as a safe default for `uShoreSdf` when no SDF is bound.
- * Sampling this with any UV returns 0, so the AABB path stays in control via `uUseShoreSdf == 0`.
+ * Lazily allocates a single module-wide fallback texture. All materials share it when
+ * `uUseShoreSdf === 0` or after {@link setOceanShoreSdf}(…, `null`). Avoids leaking one 1x1
+ * texture per {@link createOceanMaterial} call.
  */
-function createShoreSdfFallback(): THREE.DataTexture {
-  const tex = new THREE.DataTexture(
-    new Uint8Array([0, 0, 0, 255]),
-    1,
-    1,
-    THREE.RGBAFormat,
-    THREE.UnsignedByteType,
-  );
-  tex.needsUpdate = true;
-  return tex;
+function getShoreSdfFallbackTexture(): THREE.DataTexture {
+  if (!shoreSdfFallbackTexture) {
+    shoreSdfFallbackTexture = new THREE.DataTexture(
+      new Uint8Array([0, 0, 0, 255]),
+      1,
+      1,
+      THREE.RGBAFormat,
+      THREE.UnsignedByteType,
+    );
+    shoreSdfFallbackTexture.needsUpdate = true;
+  }
+  return shoreSdfFallbackTexture;
 }
 
 export function createOceanMaterial(
@@ -176,8 +182,6 @@ export function createOceanMaterial(
   config: Partial<OceanMaterialConfig> = {},
 ): { material: THREE.RawShaderMaterial; uniforms: OceanMaterialUniforms } {
   const c = { ...defaultConfig, ...config };
-
-  const shoreSdfFallback = createShoreSdfFallback();
 
   const uniforms: OceanMaterialUniforms = {
     uHeightMap: { value: textures.height },
@@ -206,7 +210,7 @@ export function createOceanMaterial(
     uFoamMaskScroll: { value: c.foamMaskScroll.clone() },
     uFoamMaskThreshold: { value: c.foamMaskThreshold },
     uIslandBounds: { value: new THREE.Vector4(-1, -1, 1, 1) },
-    uShoreSdf: { value: shoreSdfFallback },
+    uShoreSdf: { value: getShoreSdfFallbackTexture() },
     uShoreSdfBounds: { value: new THREE.Vector4(-1, -1, 1, 1) },
     uShoreSdfMaxDistance: { value: 1 },
     uUseShoreSdf: { value: 0 },
@@ -250,8 +254,8 @@ export function createOceanMaterial(
  * Pass a {@link ShoreSdf} produced by `buildShoreSdf` to make the outer foam follow that geometry's
  * silhouette. Pass `null` to switch back to the rectangular `uIslandBounds` AABB path.
  *
- * The ocean material keeps a 1x1 black fallback texture bound when no SDF is set, so the sampler is
- * always valid on the GPU even after unbinding.
+ * When unbinding, the shared module fallback is re-bound so `uShoreSdf` never points at a texture
+ * the caller may have already disposed.
  */
 export function setOceanShoreSdf(
   uniforms: OceanMaterialUniforms,
@@ -263,6 +267,7 @@ export function setOceanShoreSdf(
     uniforms.uShoreSdfMaxDistance.value = shoreSdf.maxDistance;
     uniforms.uUseShoreSdf.value = 1;
   } else {
+    uniforms.uShoreSdf.value = getShoreSdfFallbackTexture();
     uniforms.uUseShoreSdf.value = 0;
   }
 }
