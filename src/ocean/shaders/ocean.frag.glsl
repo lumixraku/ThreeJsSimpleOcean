@@ -162,9 +162,10 @@ void main() {
   innerRing = pow(innerRing, 0.7);
 
   // --- Outer foam (independent) ---
-  // Foam mask: two scrolling samples for non-tiling animated patches.
-  vec2 maskUvA = vUv * uFoamMaskTiling + uTime * uFoamMaskScroll;
-  vec2 maskUvB = vUv * (uFoamMaskTiling * 1.35) + uTime * (uFoamMaskScroll * vec2(-0.7, 0.9));
+  // Foam mask: two scrolling world-XZ samples for non-tiling animated patches.
+  // The SDF owns shoreline placement; this mask only breaks up the wash pattern.
+  vec2 maskUvA = xz * uFoamMaskTiling + uTime * uFoamMaskScroll;
+  vec2 maskUvB = xz * (uFoamMaskTiling * 1.35) + uTime * (uFoamMaskScroll * vec2(-0.7, 0.9));
   float maskRaw = max(texture2D(uFoamMask, maskUvA).r, texture2D(uFoamMask, maskUvB).r);
   float maskOuter = smoothstep(uFoamMaskThreshold, 1.0, maskRaw);
 
@@ -177,13 +178,17 @@ void main() {
   float shapeNoise = (texture2D(uFoamMask, sUvA).r + texture2D(uFoamMask, sUvB).r) * 0.5;
   float shapeOffset = (shapeNoise - 0.5) * uFoamShapeNoiseAmount * uFoamWidth;
 
-  // Outer foam fades from an adjustable shore origin to 0 at (foamWidth + shapeOffset), gated by patches.
+  // Outer foam fades from an adjustable shore origin to 0 at (foamWidth + shapeOffset).
+  // A narrow unmasked SDF core keeps the visible shore continuous, while the wider wash is mask-gated.
   // foamWidth is in absolute world units, independent of foamBaseRingWidth.
+  float outerEnabled = smoothstep(0.0, 0.005, uFoamWidth);
+  float shoreCoreWidth = max(uFoamWidth * 0.35, 1e-6);
+  float shoreCore = outerEnabled * (1.0 - smoothstep(0.0, shoreCoreWidth, max(0.0, distOutsideIsland)));
   float outerDistance = max(0.0, distOutsideIsland + uFoamOuterShoreOffset);
   float outerReach = max(uFoamWidth + shapeOffset, 1e-4);
   float outerFade = 1.0 - smoothstep(0.0, outerReach, outerDistance);
   outerFade = pow(outerFade, 1.4);
-  float outerFoam = outerFade * maskOuter;
+  float outerFoam = outerEnabled * max(shoreCore, outerFade * maskOuter);
 
   // --- Combine: inner ring sits as a guaranteed solid floor; outer patches add on top. ---
   float foam = clamp(max(innerRing, outerFoam) * uFoamStrength, 0.0, 1.0);

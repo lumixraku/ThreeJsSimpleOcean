@@ -76,7 +76,7 @@ export type OceanMaterialConfig = {
   /** Moves the outer patchy foam origin toward the island edge without changing foamWidth. */
   foamOuterShoreOffset: number;
   foamStrength: number;
-  /** Tiling factor for the foam mask sampling (higher = finer pattern). */
+  /** World-XZ frequency for the foam mask sampling (higher = finer pattern). */
   foamMaskTiling: number;
   /** Scroll velocity for the foam mask, animating the foam pattern. */
   foamMaskScroll: THREE.Vector2;
@@ -131,11 +131,11 @@ const defaultConfig: OceanMaterialConfig = {
   deepAlpha: 0.97,
   absorption: 1.6,
   // Outer patchy foam width in absolute world units (independent of inner ring).
-  foamWidth: 0.2,
+  foamWidth: 0.4,
   // Positive values pull the patchy foam inward toward the visible shore.
   foamOuterShoreOffset: 0.05,
-  foamStrength: 0.75,
-  foamMaskTiling: 6,
+  foamStrength: 0.65,
+  foamMaskTiling: 0.15,
   // Slow drift of the foam mask animation.
   foamMaskScroll: new THREE.Vector2(0.008, 0.005),
   // Higher threshold = sparser/more broken-up outer patches (less wash).
