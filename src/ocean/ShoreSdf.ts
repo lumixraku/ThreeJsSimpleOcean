@@ -10,13 +10,13 @@ import * as THREE from "three";
 export type BuildShoreSdfOptions = {
   /** Object whose silhouette to bake. Every visible mesh in this subtree counts as land. */
   object: THREE.Object3D;
-  /** Optional explicit XZ rectangle covered by the SDF (minX, minZ, maxX, maxZ). Defaults to `object`'s XZ bounds expanded by `padding`. */
+  /** Optional explicit XZ rectangle covered by the SDF (minX, minZ, maxX, maxZ). If omitted, bounds are derived from `object` expanded by `max(padding, maxDistance)` so the texture still covers the full encoded distance range (see `maxDistance`). */
   bounds?: THREE.Vector4;
-  /** Extra world-unit padding past `object`'s auto bounds. The SDF only sees out to this distance from shore. Default 12. */
+  /** Minimum world-unit padding past `object`'s silhouette when auto-deriving bounds. Default 12. The actual expansion is `max(padding, maxDistance)` unless `bounds` is set explicitly. */
   padding?: number;
   /** Square texture side length. Higher = sharper foam edges (cost is one-time). Default 256. */
   resolution?: number;
-  /** World-unit distance that maps to value 1.0 in the texture. Foam beyond this clamps to "deep". Default = padding. */
+  /** World-unit distance that maps to value 1.0 in the texture. Foam beyond this clamps to "deep". Default = `padding`. When `bounds` is omitted, auto-derived bounds expand by `max(padding, maxDistance)` so this value is not truncated at the texture edge. If you pass explicit `bounds`, ensure they extend at least `maxDistance` from the shoreline in XZ or the same clamping artifact can occur. */
   maxDistance?: number;
 };
 
@@ -42,6 +42,8 @@ export type ShoreSdf = {
  *
  * Pipeline:
  *   1. Pick / auto-derive a square XZ rectangle around `object` (extends shorter axis so pixels are isotropic).
+ *      Auto bounds expand the silhouette by `max(padding, maxDistance)` so values out to `maxDistance` are not
+ *      lost to UV clamping at the texture edge when `maxDistance > padding`.
  *   2. Deep-clone `object`, render its silhouette top-down with a flat white material into an RGBA8 RT
  *      (the live scene graph is never reparented).
  *   3. Run an exact 2D Euclidean distance transform on the CPU (Felzenszwalb & Huttenlocher 2004).
@@ -60,7 +62,8 @@ export function buildShoreSdf(
   const resolution = Math.max(32, Math.floor(options.resolution ?? 256));
   const maxDistance = options.maxDistance ?? padding;
 
-  const bounds = options.bounds ? options.bounds.clone() : defaultBoundsFor(options.object, padding);
+  const autoExpand = Math.max(padding, maxDistance);
+  const bounds = options.bounds ? options.bounds.clone() : defaultBoundsFor(options.object, autoExpand);
   squareUp(bounds);
 
   const mask = renderSilhouette(renderer, options.object, bounds, resolution);
@@ -106,7 +109,8 @@ export function buildShoreSdf(
 // Bounds helpers
 // -----------------------------------------------------------------------------
 
-function defaultBoundsFor(object: THREE.Object3D, padding: number): THREE.Vector4 {
+/** Expand `object`'s XZ bounding box by `expand` world units on each side (used for auto-derived bounds). */
+function defaultBoundsFor(object: THREE.Object3D, expand: number): THREE.Vector4 {
   const box = new THREE.Box3().setFromObject(object);
   if (
     box.isEmpty() ||
@@ -120,10 +124,10 @@ function defaultBoundsFor(object: THREE.Object3D, padding: number): THREE.Vector
     );
   }
   return new THREE.Vector4(
-    box.min.x - padding,
-    box.min.z - padding,
-    box.max.x + padding,
-    box.max.z + padding,
+    box.min.x - expand,
+    box.min.z - expand,
+    box.max.x + expand,
+    box.max.z + expand,
   );
 }
 

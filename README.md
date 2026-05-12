@@ -102,9 +102,9 @@ import {
 // Build your scene first, then bake the SDF once the island is in its final pose.
 const shoreSdf = buildShoreSdf(renderer, {
   object: islandRoot,   // any Object3D; every mesh in its subtree counts as land
-  padding: 8,           // world-unit headroom past the silhouette (= max foam reach by default)
+  padding: 8,           // minimum expansion past the silhouette for auto bounds; actual expansion is max(padding, maxDistance)
   resolution: 256,      // square texture side; 256–512 is a good range
-  // maxDistance: 8,    // optional: defaults to `padding`. Set lower for a tighter foam radius.
+  // maxDistance: 8,    // optional: defaults to `padding`. If larger than `padding`, auto bounds grow to match (avoids UV clamping). Explicit `bounds` must still extend ≥ maxDistance from shore.
 });
 
 // Option 1: bind at material creation time.
@@ -130,7 +130,7 @@ Cost: a one-time GPU readback (~3–10ms at 256², ~10–30ms at 512²) plus one
 
 #### Tuning tips
 
-- **`padding` / `maxDistance` set the maximum foam reach** in world units. The foam `foamWidth` knob still controls how far the patchy band actually extends, but if you set `foamWidth` larger than `maxDistance` the SDF clamps and the outer edge becomes flat. Keep `maxDistance >= foamWidth + foamBaseRingWidth + foamShapeNoiseAmount * foamWidth` for organic edges.
+- **`padding` / `maxDistance` set the maximum foam reach** in world units. The foam `foamWidth` knob still controls how far the patchy band actually extends, but if you set `foamWidth` larger than `maxDistance` the SDF clamps and the outer edge becomes flat. Keep `maxDistance >= foamWidth + foamBaseRingWidth + foamShapeNoiseAmount * foamWidth` for organic edges. When `bounds` is omitted, the bake expands the island’s XZ box by **`max(padding, maxDistance)`** so a larger `maxDistance` does not get flattened at the texture edge; if you pass explicit `bounds`, size them so open water extends at least `maxDistance` from the coast in every direction you care about.
 - **`resolution` controls foam edge sharpness.** 256² is usually enough because the patchy mask and shape noise hide aliasing. Bump to 512² if you see stepped/blocky boundaries on long flat coasts.
 - **Re-bake when the island changes.** `buildShoreSdf` is safe to call again at runtime (e.g. after adding/removing tiles). Dispose the old SDF first.
 - **Object placement matters.** Bake AFTER the island has its final world transform — the SDF stores absolute world XZ coordinates via `shoreSdf.bounds`. If you move the island later, re-bake.
