@@ -179,7 +179,12 @@ function renderSilhouette(
   const overrideMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
   tempScene.overrideMaterial = overrideMat;
 
+  object.updateWorldMatrix(true, true);
+
   const clone = object.clone(true);
+  clone.matrix.copy(object.matrixWorld);
+  clone.matrix.decompose(clone.position, clone.quaternion, clone.scale);
+  clone.matrixAutoUpdate = false;
   tempScene.add(clone);
   clone.updateMatrixWorld(true);
 
