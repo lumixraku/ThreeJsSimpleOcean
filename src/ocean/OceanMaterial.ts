@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import type { OceanTextureBundle } from "../loading/TextureBundleLoader";
+import type { ShoreSdf } from "./ShoreSdf";
 
 import oceanVert from "./shaders/ocean.vert.glsl?raw";
 import oceanFrag from "./shaders/ocean.frag.glsl?raw";
@@ -31,6 +32,14 @@ export type OceanMaterialUniforms = {
   uFoamMaskScroll: THREE.IUniform<THREE.Vector2>;
   uFoamMaskThreshold: THREE.IUniform<number>;
   uIslandBounds: THREE.IUniform<THREE.Vector4>;
+  /** Baked shore distance field (RGBA8; R = clamped normalized distance from land). Uses a shared 1×1 black fallback when unused. */
+  uShoreSdf: THREE.IUniform<THREE.Texture | null>;
+  /** World XZ rectangle the SDF covers (minX, minZ, maxX, maxZ). */
+  uShoreSdfBounds: THREE.IUniform<THREE.Vector4>;
+  /** World-unit distance represented by R == 1.0 in `uShoreSdf`. */
+  uShoreSdfMaxDistance: THREE.IUniform<number>;
+  /** 0 → use the AABB foam path; 1 → sample `uShoreSdf` instead. Set automatically by {@link setOceanShoreSdf}. */
+  uUseShoreSdf: THREE.IUniform<number>;
   uFoamShapeNoiseAmount: THREE.IUniform<number>;
   uFoamShapeNoiseScale: THREE.IUniform<number>;
   uFoamShapeNoiseScroll: THREE.IUniform<THREE.Vector2>;
@@ -92,6 +101,12 @@ export type OceanMaterialConfig = {
   specStrength: number;
   /** Strength of fresnel rim at glancing angles. */
   fresnelStrength: number;
+  /**
+   * Optional baked shore distance field (see {@link buildShoreSdf}). When provided, the outer foam
+   * follows the actual coastline of any geometry instead of an XZ AABB. Can also be set later via
+   * {@link setOceanShoreSdf}.
+   */
+  shoreSdf?: ShoreSdf;
 };
 
 /**
@@ -139,6 +154,28 @@ const defaultConfig: OceanMaterialConfig = {
   fresnelStrength: 0.28,
 };
 
+/** Shared 1x1 black RGBA8 fallback for `uShoreSdf` — one GPU allocation for all ocean materials. */
+let shoreSdfFallbackTexture: THREE.DataTexture | null = null;
+
+/**
+ * Lazily allocates a single module-wide fallback texture. All materials share it when
+ * `uUseShoreSdf === 0` or after {@link setOceanShoreSdf}(…, `null`). Avoids leaking one 1x1
+ * texture per {@link createOceanMaterial} call.
+ */
+function getShoreSdfFallbackTexture(): THREE.DataTexture {
+  if (!shoreSdfFallbackTexture) {
+    shoreSdfFallbackTexture = new THREE.DataTexture(
+      new Uint8Array([0, 0, 0, 255]),
+      1,
+      1,
+      THREE.RGBAFormat,
+      THREE.UnsignedByteType,
+    );
+    shoreSdfFallbackTexture.needsUpdate = true;
+  }
+  return shoreSdfFallbackTexture;
+}
+
 export function createOceanMaterial(
   textures: OceanTextureBundle,
   depthTexture: THREE.DepthTexture,
@@ -173,6 +210,10 @@ export function createOceanMaterial(
     uFoamMaskScroll: { value: c.foamMaskScroll.clone() },
     uFoamMaskThreshold: { value: c.foamMaskThreshold },
     uIslandBounds: { value: new THREE.Vector4(-1, -1, 1, 1) },
+    uShoreSdf: { value: getShoreSdfFallbackTexture() },
+    uShoreSdfBounds: { value: new THREE.Vector4(-1, -1, 1, 1) },
+    uShoreSdfMaxDistance: { value: 1 },
+    uUseShoreSdf: { value: 0 },
     uFoamShapeNoiseAmount: { value: c.foamShapeNoiseAmount },
     uFoamShapeNoiseScale: { value: c.foamShapeNoiseScale },
     uFoamShapeNoiseScroll: { value: c.foamShapeNoiseScroll.clone() },
@@ -202,7 +243,37 @@ export function createOceanMaterial(
     side: THREE.FrontSide,
   });
 
+  if (c.shoreSdf) setOceanShoreSdf(uniforms, c.shoreSdf);
+
   return { material, uniforms };
+}
+
+/**
+ * Bind (or unbind) a baked shore distance field to an ocean material's uniforms.
+ *
+ * Pass a {@link ShoreSdf} produced by `buildShoreSdf` to make the outer foam follow that geometry's
+ * silhouette. Pass `null` to switch back to the rectangular `uIslandBounds` AABB path.
+ *
+ * When unbinding, the shared module fallback is re-bound to `uShoreSdf` so it never keeps a pointer
+ * to a texture the caller may have disposed. `uShoreSdfBounds` and `uShoreSdfMaxDistance` are reset to
+ * the same defaults as {@link createOceanMaterial} (they are unused while `uUseShoreSdf` is 0, but
+ * this avoids stale values in debuggers and future shader edits).
+ */
+export function setOceanShoreSdf(
+  uniforms: OceanMaterialUniforms,
+  shoreSdf: ShoreSdf | null,
+): void {
+  if (shoreSdf) {
+    uniforms.uShoreSdf.value = shoreSdf.texture;
+    uniforms.uShoreSdfBounds.value.copy(shoreSdf.bounds);
+    uniforms.uShoreSdfMaxDistance.value = shoreSdf.maxDistance;
+    uniforms.uUseShoreSdf.value = 1;
+  } else {
+    uniforms.uShoreSdf.value = getShoreSdfFallbackTexture();
+    uniforms.uShoreSdfBounds.value.set(-1, -1, 1, 1);
+    uniforms.uShoreSdfMaxDistance.value = 1;
+    uniforms.uUseShoreSdf.value = 0;
+  }
 }
 
 /**

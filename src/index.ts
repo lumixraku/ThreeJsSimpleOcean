@@ -6,9 +6,16 @@
 export {
   bindOceanMatrices,
   createOceanMaterial,
+  setOceanShoreSdf,
   type OceanMaterialConfig,
   type OceanMaterialUniforms,
 } from "./ocean/OceanMaterial";
+
+export {
+  buildShoreSdf,
+  type BuildShoreSdfOptions,
+  type ShoreSdf,
+} from "./ocean/ShoreSdf";
 
 export { loadOceanTextures, type OceanTextureBundle } from "./loading/TextureBundleLoader";
 
