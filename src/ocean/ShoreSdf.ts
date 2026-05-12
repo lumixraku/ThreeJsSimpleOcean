@@ -176,7 +176,10 @@ function renderSilhouette(
 ): Uint8Array {
   const tempScene = new THREE.Scene();
   tempScene.background = new THREE.Color(0x000000);
-  const overrideMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+  const overrideMat = new THREE.MeshBasicMaterial({
+    color: 0xffffff,
+    side: THREE.DoubleSide,
+  });
   tempScene.overrideMaterial = overrideMat;
 
   object.updateWorldMatrix(true, true);
