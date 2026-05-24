@@ -158,14 +158,14 @@ The render path is three passes per frame:
 2. **Full opaque pass** — correct lit color and default depth buffer for water `depthTest`.
 3. **Transparent water** — full resolution; ~8 texture samples per pixel.
 
-Cost compounds with **full-screen water × high DPR × multi-pass rendering**. Defaults in `renderFrame` are tuned for this:
+Cost compounds with **full-screen water × high DPR × multi-pass rendering**. `renderFrame` defaults are tuned for this, and adaptive depth scaling is available as an opt-in:
 
 | Lever | API | Default |
 |-------|-----|---------|
 | Depth override material | `options.useDepthOverrideMaterial` | `true` |
 | Depth-caster layers | `tagOceanDepthCasters(mesh)` + `registerOceanDepthCastersScene(scene)` if tagged before add | enabled when scene registered |
-| Adaptive depth scale | `AdaptiveDepthScale` + `options.frameDeltaMs` | 0.5×, drops to 0.25× when over budget |
-| Fixed depth scale | `options.depthResolutionScale` | `1` (when adaptive off) |
+| Adaptive depth scale | `AdaptiveDepthScale` + `options.frameDeltaMs` | opt-in; when supplied, starts at 0.5× and drops to 0.25× when over budget |
+| Fixed depth scale | `options.depthResolutionScale` | `1` when adaptive scaling is not supplied |
 | Shadow skip in pass 1 | `options.disableShadowsInDepthPass` | `true` |
 | Shore SDF resolution | `buildShoreSdf({ resolution })` | `128` |
 | DPR cap | `renderer.setPixelRatio(Math.min(dpr, 2))` | recommended |
