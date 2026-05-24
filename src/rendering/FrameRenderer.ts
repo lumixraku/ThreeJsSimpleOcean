@@ -16,7 +16,7 @@ export type RenderFrameOptions = {
   adaptiveDepthScale?: AdaptiveDepthScale;
   /** Frame delta in milliseconds — required when using `adaptiveDepthScale`. */
   frameDeltaMs?: number;
-  /** Use {@link MeshDepthMaterial} override in pass 1 (default true). */
+  /** Use {@link THREE.MeshDepthMaterial} override in pass 1 (default true). */
   useDepthOverrideMaterial?: boolean;
   /** Restrict pass 1 to {@link OCEAN_DEPTH_CASTER_LAYER} when the opaque scene is registered (default true). */
   useDepthCasterLayers?: boolean;
