@@ -1,6 +1,6 @@
 import * as THREE from "three";
 
-/** Layer mask for geometry that should appear in the cheap depth pre-pass. */
+/** Layer index for geometry that should appear in the cheap depth pre-pass. */
 export const OCEAN_DEPTH_CASTER_LAYER = 1;
 
 /**
