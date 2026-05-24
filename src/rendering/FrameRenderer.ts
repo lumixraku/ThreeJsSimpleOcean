@@ -80,7 +80,7 @@ export function renderFrame(ctx: FrameRenderContext): void {
   const prevShadowEnabled = renderer.shadowMap.enabled;
 
   renderer.setRenderTarget(depthPass.renderTarget);
-  renderer.clear(true, true, false);
+  renderer.clear(false, true, false);
 
   if (useDepthOverrideMaterial) {
     opaqueScene.overrideMaterial = getDepthPrePassMaterial();
