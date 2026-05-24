@@ -65,7 +65,7 @@ const textures = await loadOceanTextures(
   4,
 );
 
-const oceanGeometry = new THREE.PlaneGeometry(120, 120, 240, 240);
+const oceanGeometry = new THREE.PlaneGeometry(120, 120, 128, 128);
 oceanGeometry.computeTangents();
 
 const { material, uniforms } = createOceanMaterial(textures, depthPass.depthTexture);

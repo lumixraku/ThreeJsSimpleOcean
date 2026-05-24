@@ -19,6 +19,15 @@ export {
 
 export { loadOceanTextures, type OceanTextureBundle } from "./loading/TextureBundleLoader";
 
+export { AdaptiveDepthScale, type AdaptiveDepthScaleOptions } from "./rendering/AdaptiveDepthScale";
 export { DepthPrePassTarget } from "./rendering/DepthPrePassTarget";
 export { BlitPass } from "./rendering/BlitPass";
-export { renderFrame, type FrameRenderContext } from "./rendering/FrameRenderer";
+export {
+  renderFrame,
+  type FrameRenderContext,
+  type RenderFrameOptions,
+} from "./rendering/FrameRenderer";
+export {
+  OCEAN_DEPTH_CASTER_LAYER,
+  tagOceanDepthCasters,
+} from "./rendering/OceanDepthLayers";

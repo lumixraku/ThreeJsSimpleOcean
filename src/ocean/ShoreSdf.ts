@@ -14,7 +14,7 @@ export type BuildShoreSdfOptions = {
   bounds?: THREE.Vector4;
   /** Minimum world-unit padding past `object`'s silhouette when auto-deriving bounds. Default 12. The actual expansion is `max(padding, maxDistance)` unless `bounds` is set explicitly. */
   padding?: number;
-  /** Square texture side length. Higher = sharper foam edges (cost is one-time). Default 256. */
+  /** Square texture side length. Higher = sharper foam edges (cost is one-time). Default 128. */
   resolution?: number;
   /** World-unit distance that maps to value 1.0 in the texture. Foam beyond this clamps to "deep". Default = `padding`. When `bounds` is omitted, auto-derived bounds expand by `max(padding, maxDistance)` so this value is not truncated at the texture edge. If you pass explicit `bounds`, ensure they extend at least `maxDistance` from the shoreline in XZ or the same clamping artifact can occur. */
   maxDistance?: number;
@@ -49,7 +49,7 @@ export type ShoreSdf = {
  *   3. Run an exact 2D Euclidean distance transform on the CPU (Felzenszwalb & Huttenlocher 2004).
  *   4. Encode `clamp(distanceWorld / maxDistance, 0, 1)` into a `DataTexture`.
  *
- * Cost: one-time GPU readback (a few ms for 256²; ~10–30ms for 512²). Per-frame cost is one texture sample.
+ * Cost: one-time GPU readback (a few ms for 128²; ~10–30ms for 512²). Per-frame cost is one texture sample.
  *
  * Re-bake when the island geometry changes (e.g. tile add/remove). The function is safe to call again
  * to produce a fresh `ShoreSdf`; remember to `dispose()` the old one.
@@ -59,7 +59,7 @@ export function buildShoreSdf(
   options: BuildShoreSdfOptions,
 ): ShoreSdf {
   const padding = options.padding ?? 12;
-  const resolution = Math.max(32, Math.floor(options.resolution ?? 256));
+  const resolution = Math.max(32, Math.floor(options.resolution ?? 128));
   const maxDistance = options.maxDistance ?? padding;
 
   const autoExpand = Math.max(padding, maxDistance);
