@@ -164,7 +164,7 @@ Cost compounds with **full-screen water × high DPR × multi-pass rendering**. D
 |-------|-----|---------|
 | Depth override material | `options.useDepthOverrideMaterial` | `true` |
 | Depth-caster layers | `tagOceanDepthCasters(mesh)` + `registerOceanDepthCastersScene(scene)` if tagged before add | enabled when scene registered |
-| Adaptive depth scale | `AdaptiveDepthScale` + `options.frameDeltaMs` | 0.5×, drops to 0.25× under budget |
+| Adaptive depth scale | `AdaptiveDepthScale` + `options.frameDeltaMs` | 0.5×, drops to 0.25× when over budget |
 | Fixed depth scale | `options.depthResolutionScale` | `1` (when adaptive off) |
 | Shadow skip in pass 1 | `options.disableShadowsInDepthPass` | `true` |
 | Shore SDF resolution | `buildShoreSdf({ resolution })` | `128` |
