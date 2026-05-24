@@ -54,7 +54,11 @@ const textures = await loadOceanTextures(
 );
 
 // Tag underwater geometry for the cheap depth pre-pass (floor, island, etc.).
+// Tag after adding to opaqueScene so the scene is registered automatically,
+// or call registerOceanDepthCastersScene(opaqueScene) once after setup.
+opaqueScene.add(floor);
 tagOceanDepthCasters(floor);
+opaqueScene.add(islandRoot);
 tagOceanDepthCasters(islandRoot);
 
 const geometry = new THREE.PlaneGeometry(120, 120, 128, 128);
@@ -162,7 +166,7 @@ Cost compounds with **full-screen water × high DPR × multi-pass rendering**. D
 | Lever | API | Default |
 |-------|-----|---------|
 | Depth override material | `options.useDepthOverrideMaterial` | `true` |
-| Depth-caster layers | `tagOceanDepthCasters(mesh)` + `options.useDepthCasterLayers` | enabled when tagged |
+| Depth-caster layers | `tagOceanDepthCasters(mesh)` + `registerOceanDepthCastersScene(scene)` if tagged before add | enabled when scene registered |
 | Adaptive depth scale | `AdaptiveDepthScale` + `options.frameDeltaMs` | 0.5×, drops to 0.25× under budget |
 | Fixed depth scale | `options.depthResolutionScale` | `1` (when adaptive off) |
 | Shadow skip in pass 1 | `options.disableShadowsInDepthPass` | `true` |
@@ -188,7 +192,7 @@ renderFrame({
 });
 ```
 
-If no meshes are tagged with `tagOceanDepthCasters`, pass 1 falls back to rendering the full opaque scene (backward compatible).
+If no scene is registered (via tagging in-graph or `registerOceanDepthCastersScene`), pass 1 falls back to rendering the full opaque scene (backward compatible). Override per frame with `options.filterDepthCasters`.
 
 ## Public API
 
@@ -201,7 +205,9 @@ If no meshes are tagged with `tagOceanDepthCasters`, pass 1 falls back to render
 | `loadOceanTextures` | Loads and configures repeat/anisotropy; **placeholders on failure**. |
 | `DepthPrePassTarget` | Depth render target whose `depthTexture` the water shader samples. Supports scaled sizing. |
 | `AdaptiveDepthScale` | Adapts depth pre-pass resolution between 0.5× and 0.25× based on frame time. |
-| `tagOceanDepthCasters` | Tag meshes for the cheap layer-filtered depth pre-pass. |
+| `tagOceanDepthCasters` | Tag meshes for the cheap layer-filtered depth pre-pass; auto-registers parent scene when in-graph. |
+| `registerOceanDepthCastersScene` | Register an opaque scene for layer filtering (use when tagging before `scene.add`). |
+| `hasOceanDepthCasters` | O(1) check whether a scene uses layer-filtered depth casters. |
 | `OCEAN_DEPTH_CASTER_LAYER` | Layer constant used by `tagOceanDepthCasters`. |
 | `BlitPass` | Full-screen blit utility (required by `renderFrame` context; optional for experiments). |
 | `renderFrame` | Cheap depth pre-pass → screen opaque → transparent water. |

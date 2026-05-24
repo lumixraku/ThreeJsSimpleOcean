@@ -81,12 +81,12 @@ export class OceanApplication {
     const grass = await this.tryLoadGrass();
     this.grassDispose = grass.dispose;
     const islandRoot = this.buildIslandLayout(grass.root);
-    tagOceanDepthCasters(islandRoot);
     this.opaqueScene.add(islandRoot);
+    tagOceanDepthCasters(islandRoot);
 
     const floor = this.buildOceanFloor();
-    tagOceanDepthCasters(floor);
     this.opaqueScene.add(floor);
+    tagOceanDepthCasters(floor);
 
     const oceanGeometry = new THREE.PlaneGeometry(120, 120, 128, 128);
     oceanGeometry.computeTangents();

@@ -19,8 +19,10 @@ export type RenderFrameOptions = {
   frameDeltaMs?: number;
   /** Use {@link MeshDepthMaterial} override in pass 1 (default true). */
   useDepthOverrideMaterial?: boolean;
-  /** Restrict pass 1 to {@link OCEAN_DEPTH_CASTER_LAYER} when tagged meshes exist (default true). */
+  /** Restrict pass 1 to {@link OCEAN_DEPTH_CASTER_LAYER} when the opaque scene is registered (default true). */
   useDepthCasterLayers?: boolean;
+  /** Override layer filtering: `true` = filter, `false` = full opaque scene, `undefined` = use registration flag. */
+  filterDepthCasters?: boolean;
   /** Disable shadow map updates during pass 1 (default true). */
   disableShadowsInDepthPass?: boolean;
 };
@@ -58,6 +60,7 @@ export function renderFrame(ctx: FrameRenderContext): void {
     frameDeltaMs = 0,
     useDepthOverrideMaterial = true,
     useDepthCasterLayers = true,
+    filterDepthCasters,
     disableShadowsInDepthPass = true,
   } = options;
 
@@ -90,8 +93,9 @@ export function renderFrame(ctx: FrameRenderContext): void {
     renderer.shadowMap.enabled = false;
   }
 
-  const filterDepthCasters = useDepthCasterLayers && hasOceanDepthCasters(opaqueScene);
-  if (filterDepthCasters) {
+  const filterDepthCastersPass =
+    useDepthCasterLayers && (filterDepthCasters ?? hasOceanDepthCasters(opaqueScene));
+  if (filterDepthCastersPass) {
     camera.layers.set(OCEAN_DEPTH_CASTER_LAYER);
   }
 

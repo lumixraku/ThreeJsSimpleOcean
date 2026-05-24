@@ -29,5 +29,7 @@ export {
 } from "./rendering/FrameRenderer";
 export {
   OCEAN_DEPTH_CASTER_LAYER,
+  hasOceanDepthCasters,
+  registerOceanDepthCastersScene,
   tagOceanDepthCasters,
 } from "./rendering/OceanDepthLayers";
