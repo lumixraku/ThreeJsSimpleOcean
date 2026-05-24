@@ -169,13 +169,11 @@ void main() {
   float maskRaw = max(texture2D(uFoamMask, maskUvA).r, texture2D(uFoamMask, maskUvB).r);
   float maskOuter = smoothstep(uFoamMaskThreshold, 1.0, maskRaw);
 
-  // Shape noise wobbles the outer silhouette only.
+  // Shape noise wobbles the outer silhouette only — procedural hash from shape UVs (no extra fetches).
   // IMPORTANT: shape offset is expressed as a FRACTION of uFoamWidth, NOT absolute world units.
-  // This way, when uFoamWidth -> 0 the shape noise contribution -> 0 too, so the outer foam
-  // genuinely vanishes (no residual band leaking out from shape noise).
-  vec2 sUvA = xz * uFoamShapeNoiseScale + uTime * uFoamShapeNoiseScroll;
-  vec2 sUvB = xz * (uFoamShapeNoiseScale * 0.62) + uTime * (uFoamShapeNoiseScroll * vec2(-1.3, 0.8));
-  float shapeNoise = (texture2D(uFoamMask, sUvA).r + texture2D(uFoamMask, sUvB).r) * 0.5;
+  vec2 shapeSeedA = xz * uFoamShapeNoiseScale + uTime * uFoamShapeNoiseScroll;
+  vec2 shapeSeedB = xz * (uFoamShapeNoiseScale * 0.62) + uTime * (uFoamShapeNoiseScroll * vec2(-1.3, 0.8));
+  float shapeNoise = fract(sin(dot(shapeSeedA, vec2(12.9898, 78.233)) + dot(shapeSeedB, vec2(39.3468, 11.1355))) * 43758.5453);
   float shapeOffset = (shapeNoise - 0.5) * uFoamShapeNoiseAmount * uFoamWidth;
 
   // Outer foam fades from an adjustable shore origin to 0 at (foamWidth + shapeOffset).
