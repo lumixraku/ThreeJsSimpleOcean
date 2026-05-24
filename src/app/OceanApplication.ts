@@ -5,8 +5,9 @@ import { AssetPaths } from "../config/AssetPaths";
 import { loadOceanTextures, type OceanTextureBundle } from "../loading/TextureBundleLoader";
 import { createOceanMaterial, setOceanShoreSdf } from "../ocean/OceanMaterial";
 import { buildShoreSdf, type ShoreSdf } from "../ocean/ShoreSdf";
-import { BlitPass } from "../rendering/BlitPass";
+import { AdaptiveDepthScale } from "../rendering/AdaptiveDepthScale";
 import { DepthPrePassTarget } from "../rendering/DepthPrePassTarget";
+import { tagOceanDepthCasters } from "../rendering/OceanDepthLayers";
 import { renderFrame } from "../rendering/FrameRenderer";
 import { loadGrassTile, makeGrassPlaceholder } from "../stage/GrassTileLoader";
 import { computeTileBoundsXZ } from "../stage/TileBounds";
@@ -30,7 +31,7 @@ export class OceanApplication {
   private readonly opaqueScene = new THREE.Scene();
   private readonly waterScene = new THREE.Scene();
   private readonly depthPass: DepthPrePassTarget;
-  private readonly blitPass: BlitPass;
+  private readonly adaptiveDepthScale = new AdaptiveDepthScale();
 
   private oceanMesh!: THREE.Mesh;
   private oceanUniforms!: ReturnType<typeof createOceanMaterial>["uniforms"];
@@ -55,7 +56,6 @@ export class OceanApplication {
     this.controls.update();
 
     this.depthPass = new DepthPrePassTarget();
-    this.blitPass = new BlitPass();
 
     this.opaqueScene.background = SceneLayout.skyColor;
     this.waterScene.background = null;
@@ -79,11 +79,13 @@ export class OceanApplication {
     this.grassDispose = grass.dispose;
     const islandRoot = this.buildIslandLayout(grass.root);
     this.opaqueScene.add(islandRoot);
+    tagOceanDepthCasters(islandRoot);
 
     const floor = this.buildOceanFloor();
     this.opaqueScene.add(floor);
+    tagOceanDepthCasters(floor);
 
-    const oceanGeometry = new THREE.PlaneGeometry(120, 120, 240, 240);
+    const oceanGeometry = new THREE.PlaneGeometry(120, 120, 128, 128);
     oceanGeometry.computeTangents();
 
     const { material, uniforms } = createOceanMaterial(this.oceanTextures, this.depthPass.depthTexture);
@@ -98,7 +100,6 @@ export class OceanApplication {
     this.shoreSdf = buildShoreSdf(this.renderer, {
       object: islandRoot,
       padding: 8,
-      resolution: 256,
     });
     setOceanShoreSdf(this.oceanUniforms, this.shoreSdf);
 
@@ -181,7 +182,10 @@ export class OceanApplication {
       oceanMesh: this.oceanMesh,
       oceanUniforms: this.oceanUniforms,
       depthPass: this.depthPass,
-      blitPass: this.blitPass,
+      options: {
+        adaptiveDepthScale: this.adaptiveDepthScale,
+        frameDeltaMs: dt * 1000,
+      },
     });
   };
 
@@ -198,7 +202,6 @@ export class OceanApplication {
     this.renderer.setAnimationLoop(null);
     this.controls.dispose();
     this.depthPass.dispose();
-    this.blitPass.dispose();
     this.shoreSdf?.dispose();
     this.grassDispose?.();
 

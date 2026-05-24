@@ -4,3 +4,7 @@ dist-demo/
 examples/**/node_modules/
 examples/**/dist/
 *.local
+.claude
+.cursor
+.codex
+./.codex*
