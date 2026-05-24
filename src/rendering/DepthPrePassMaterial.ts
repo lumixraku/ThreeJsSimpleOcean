@@ -16,3 +16,14 @@ export function getDepthPrePassMaterial(): THREE.MeshDepthMaterial {
   }
   return depthPrePassMaterial;
 }
+
+/**
+ * Disposes the shared depth pre-pass material and clears the cached reference.
+ * Call this during renderer/pipeline teardown or hot-reload cleanup.
+ */
+export function disposeDepthPrePassMaterial(): void {
+  if (depthPrePassMaterial) {
+    depthPrePassMaterial.dispose();
+    depthPrePassMaterial = null;
+  }
+}
