@@ -22,7 +22,6 @@ Your app must render **opaque geometry first** (into an off-screen target that e
 import * as THREE from "three";
 import {
   AdaptiveDepthScale,
-  BlitPass,
   createOceanMaterial,
   DepthPrePassTarget,
   loadOceanTextures,
@@ -38,7 +37,6 @@ const opaqueScene = new THREE.Scene();
 const waterScene = new THREE.Scene();
 
 const depthPass = new DepthPrePassTarget();
-const blitPass = new BlitPass();
 const adaptiveDepthScale = new AdaptiveDepthScale();
 
 const texLoader = new THREE.TextureLoader();
@@ -81,7 +79,6 @@ function tick(dtMs: number) {
     oceanMesh,
     oceanUniforms: uniforms,
     depthPass,
-    blitPass,
     options: {
       adaptiveDepthScale,
       frameDeltaMs: dtMs,
@@ -209,7 +206,7 @@ If no scene is registered (via tagging in-graph or `registerOceanDepthCastersSce
 | `registerOceanDepthCastersScene` | Register an opaque scene for layer filtering (use when tagging before `scene.add`). |
 | `hasOceanDepthCasters` | O(1) check whether a scene uses layer-filtered depth casters. |
 | `OCEAN_DEPTH_CASTER_LAYER` | Layer constant used by `tagOceanDepthCasters`. |
-| `BlitPass` | Full-screen blit utility (required by `renderFrame` context; optional for experiments). |
+| `BlitPass` | Full-screen blit utility for custom pipelines (not used by `renderFrame`). |
 | `renderFrame` | Cheap depth pre-pass → screen opaque → transparent water. |
 
 Types: `OceanMaterialConfig`, `OceanMaterialUniforms`, `OceanTextureBundle`, `FrameRenderContext`, `RenderFrameOptions`, `AdaptiveDepthScaleOptions`, `ShoreSdf`, `BuildShoreSdfOptions`.

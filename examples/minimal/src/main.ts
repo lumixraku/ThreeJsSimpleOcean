@@ -1,7 +1,6 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import {
-  BlitPass,
   createOceanMaterial,
   DepthPrePassTarget,
   loadOceanTextures,
@@ -50,7 +49,6 @@ floor.position.y = floorY;
 opaqueScene.add(floor);
 
 const depthPass = new DepthPrePassTarget();
-const blitPass = new BlitPass();
 
 const texLoader = new THREE.TextureLoader();
 // Intentionally missing URLs → library uses built-in placeholder textures (no assets required).
@@ -101,6 +99,5 @@ renderer.setAnimationLoop(() => {
     oceanMesh,
     oceanUniforms: uniforms,
     depthPass,
-    blitPass,
   });
 });

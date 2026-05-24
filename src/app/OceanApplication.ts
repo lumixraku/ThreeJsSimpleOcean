@@ -6,7 +6,6 @@ import { loadOceanTextures, type OceanTextureBundle } from "../loading/TextureBu
 import { createOceanMaterial, setOceanShoreSdf } from "../ocean/OceanMaterial";
 import { buildShoreSdf, type ShoreSdf } from "../ocean/ShoreSdf";
 import { AdaptiveDepthScale } from "../rendering/AdaptiveDepthScale";
-import { BlitPass } from "../rendering/BlitPass";
 import { DepthPrePassTarget } from "../rendering/DepthPrePassTarget";
 import { tagOceanDepthCasters } from "../rendering/OceanDepthLayers";
 import { renderFrame } from "../rendering/FrameRenderer";
@@ -32,7 +31,6 @@ export class OceanApplication {
   private readonly opaqueScene = new THREE.Scene();
   private readonly waterScene = new THREE.Scene();
   private readonly depthPass: DepthPrePassTarget;
-  private readonly blitPass: BlitPass;
   private readonly adaptiveDepthScale = new AdaptiveDepthScale();
 
   private oceanMesh!: THREE.Mesh;
@@ -58,7 +56,6 @@ export class OceanApplication {
     this.controls.update();
 
     this.depthPass = new DepthPrePassTarget();
-    this.blitPass = new BlitPass();
 
     this.opaqueScene.background = SceneLayout.skyColor;
     this.waterScene.background = null;
@@ -185,7 +182,6 @@ export class OceanApplication {
       oceanMesh: this.oceanMesh,
       oceanUniforms: this.oceanUniforms,
       depthPass: this.depthPass,
-      blitPass: this.blitPass,
       options: {
         adaptiveDepthScale: this.adaptiveDepthScale,
         frameDeltaMs: dt * 1000,
@@ -206,7 +202,6 @@ export class OceanApplication {
     this.renderer.setAnimationLoop(null);
     this.controls.dispose();
     this.depthPass.dispose();
-    this.blitPass.dispose();
     this.shoreSdf?.dispose();
     this.grassDispose?.();
 

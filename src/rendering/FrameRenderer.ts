@@ -2,7 +2,6 @@ import * as THREE from "three";
 import type { OceanMaterialUniforms } from "../ocean/OceanMaterial";
 import { bindOceanMatrices } from "../ocean/OceanMaterial";
 import type { AdaptiveDepthScale } from "./AdaptiveDepthScale";
-import { BlitPass } from "./BlitPass";
 import { getDepthPrePassMaterial } from "./DepthPrePassMaterial";
 import { DepthPrePassTarget } from "./DepthPrePassTarget";
 import { hasOceanDepthCasters, OCEAN_DEPTH_CASTER_LAYER } from "./OceanDepthLayers";
@@ -35,7 +34,6 @@ export type FrameRenderContext = {
   oceanMesh: THREE.Mesh;
   oceanUniforms: OceanMaterialUniforms;
   depthPass: DepthPrePassTarget;
-  blitPass: BlitPass;
   options?: RenderFrameOptions;
 };
 
