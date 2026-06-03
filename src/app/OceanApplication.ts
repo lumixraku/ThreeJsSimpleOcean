@@ -283,19 +283,34 @@ export class OceanApplication {
     panel.appendChild(title);
 
     heading("Time of day");
-    const fmtClock = (v: number) => {
-      const h = Math.floor(v) % 24;
-      const m = Math.floor((v - Math.floor(v)) * 60);
-      return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
-    };
+    // Hours and minutes feed the same `setHour(h + m/60)`. Cache the current value of the partner
+    // slider in closures so dragging one doesn't reset the other.
+    let curH = Math.floor(this.sunController.hour);
+    let curM = Math.floor((this.sunController.hour - curH) * 60);
+    const pushClock = () => this.sunController.setHour(curH + curM / 60);
     slider(
-      "time",
+      "hour",
       0,
-      24,
-      0.05,
-      this.sunController.hour,
-      (v) => this.sunController.setHour(v),
-      fmtClock,
+      23,
+      1,
+      curH,
+      (v) => {
+        curH = Math.floor(v);
+        pushClock();
+      },
+      (v) => String(Math.floor(v)).padStart(2, "0"),
+    );
+    slider(
+      "minute",
+      0,
+      59,
+      1,
+      curM,
+      (v) => {
+        curM = Math.floor(v);
+        pushClock();
+      },
+      (v) => String(Math.floor(v)).padStart(2, "0"),
     );
 
     const u = this.sky.uniforms;
