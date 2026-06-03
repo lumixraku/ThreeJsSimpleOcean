@@ -51,9 +51,9 @@ export function createSky(): SkySystem {
     uCloudHeight: { value: 70.0 },
     uCloudThickness: { value: 28.0 },
     uCloudScale: { value: 28.0 },
-    uCloudSpeed: { value: 0.4 },
+    uCloudSpeed: { value: 3.5 },
     uCloudAbsorb: { value: 0.6 },
-    uCloudWind: { value: new THREE.Vector2(1.0, 0.2) },
+    uCloudWind: { value: new THREE.Vector2(4.0, 1.2) },
   };
 
   // Single full-screen triangle covering NDC [-1,1]^2 — cheaper than a quad and avoids the diagonal seam.

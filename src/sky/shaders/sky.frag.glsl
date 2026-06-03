@@ -59,8 +59,16 @@ float fbm(vec3 p) {
   mat3 m = mat3(0.00, 1.60, 1.20,
                -1.60, 0.72, -0.96,
                -1.20, -0.96, 1.28);
+  // Per-octave temporal jitter so higher-frequency detail "boils" while the low-frequency shape
+  // translates with the wind. Without this the clouds look like a slowly-sliding photograph.
+  float tEvolve = uTime * uCloudSpeed * 0.35;
   for (int i = 0; i < 4; i++) {
-    v += a * noise(p);
+    vec3 offset = vec3(
+      sin(tEvolve * (1.0 + 0.7 * float(i))),
+      cos(tEvolve * (0.8 + 0.5 * float(i))),
+      sin(tEvolve * (1.3 + 0.4 * float(i)) + 1.7)
+    ) * 0.35;
+    v += a * noise(p + offset);
     p = m * p;
     a *= 0.5;
   }

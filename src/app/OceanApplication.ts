@@ -305,7 +305,7 @@ export class OceanApplication {
     slider("height", 20, 200, 1, u.uCloudHeight.value, (v) => (u.uCloudHeight.value = v));
     slider("thickness", 2, 80, 0.5, u.uCloudThickness.value, (v) => (u.uCloudThickness.value = v));
     slider("scale", 4, 80, 0.5, u.uCloudScale.value, (v) => (u.uCloudScale.value = v));
-    slider("speed", 0, 4, 0.05, u.uCloudSpeed.value, (v) => (u.uCloudSpeed.value = v));
+    slider("speed", 0, 10, 0.1, u.uCloudSpeed.value, (v) => (u.uCloudSpeed.value = v));
 
     document.body.appendChild(panel);
     this.controlPanel = panel;
