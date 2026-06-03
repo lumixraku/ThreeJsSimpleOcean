@@ -19,6 +19,7 @@ export type OceanMaterialUniforms = {
   uSurfaceTiling: THREE.IUniform<number>;
   uDisplacement: THREE.IUniform<number>;
   uLightDirWorld: THREE.IUniform<THREE.Vector3>;
+  uSunColor: THREE.IUniform<THREE.Color>;
   uCameraPos: THREE.IUniform<THREE.Vector3>;
   uShallowColor: THREE.IUniform<THREE.Color>;
   uDeepColor: THREE.IUniform<THREE.Color>;
@@ -197,6 +198,7 @@ export function createOceanMaterial(
     uSurfaceTiling: { value: c.surfaceTiling },
     uDisplacement: { value: c.displacement },
     uLightDirWorld: { value: new THREE.Vector3(0.35, 0.85, 0.35).normalize() },
+    uSunColor: { value: new THREE.Color(1.0, 1.0, 1.0) },
     uCameraPos: { value: new THREE.Vector3() },
     uShallowColor: { value: c.shallowColor.clone() },
     uDeepColor: { value: c.deepColor.clone() },

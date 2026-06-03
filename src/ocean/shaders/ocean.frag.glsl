@@ -2,6 +2,7 @@ precision highp float;
 
 uniform vec3 uCameraPos;
 uniform vec3 uLightDirWorld;
+uniform vec3 uSunColor;
 
 uniform sampler2D uBaseColor;
 uniform sampler2D uNormalMap;
@@ -107,14 +108,18 @@ void main() {
   surfaceAlbedo = mix(surfaceAlbedo, surfaceAlbedo * uShallowColor * 2.0, 0.5);
   vec3 surfaceLit = surfaceAlbedo * (0.55 + 0.45 * ndotl);
 
-  // Specular twinkle from the normal map — always visible (this is how you "see" the normals).
+  // Specular twinkle from the normal map — tinted by the sun color so sunset water glows warm.
   vec3 R = reflect(-lightDir, n);
   float spec = pow(max(0.0, dot(R, viewDir)), 80.0);
-  vec3 specular = vec3(spec) * uSpecStrength;
+  // Broader sun glare along the eye-sun direction, also tinted by sun color and faded by elevation.
+  float sunAlong = max(0.0, dot(viewDir, lightDir));
+  float sunGlare = pow(sunAlong, 32.0) * smoothstep(-0.05, 0.25, lightDir.y);
+  vec3 specular = (vec3(spec) + uSunColor * sunGlare * 0.35) * uSunColor * uSpecStrength;
 
-  // Fresnel rim — adds sky-tinted reflection at glancing angles.
+  // Fresnel rim — tinted by sun color near the horizon, otherwise a cool sky tint.
   float fres = pow(1.0 - max(0.0, dot(n, viewDir)), 5.0);
-  vec3 fresnel = vec3(0.78, 0.88, 1.0) * fres * uFresnelStrength;
+  vec3 skyTint = mix(uSunColor, vec3(0.78, 0.88, 1.0), smoothstep(0.0, 0.5, lightDir.y));
+  vec3 fresnel = skyTint * fres * uFresnelStrength;
 
   vec3 surface = surfaceLit + specular + fresnel;
 

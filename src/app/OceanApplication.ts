@@ -9,6 +9,8 @@ import { AdaptiveDepthScale } from "../rendering/AdaptiveDepthScale";
 import { DepthPrePassTarget } from "../rendering/DepthPrePassTarget";
 import { tagOceanDepthCasters } from "../rendering/OceanDepthLayers";
 import { renderFrame } from "../rendering/FrameRenderer";
+import { createSky, SKY_LAYER, type SkySystem } from "../sky/SkySystem";
+import { SunController } from "../sky/SunController";
 import { loadGrassTile, makeGrassPlaceholder } from "../stage/GrassTileLoader";
 import { computeTileBoundsXZ } from "../stage/TileBounds";
 
@@ -19,7 +21,6 @@ const SceneLayout = {
   waterY: 1.5,
   floorY: -2.0,
   floorColor: new THREE.Color(0.01, 0.05, 0.11),
-  skyColor: new THREE.Color(0x87b6e8),
 };
 
 export class OceanApplication {
@@ -38,6 +39,11 @@ export class OceanApplication {
   private oceanTextures: OceanTextureBundle | null = null;
   private grassDispose: (() => void) | null = null;
   private shoreSdf: ShoreSdf | null = null;
+  private sky!: SkySystem;
+  private sunController!: SunController;
+  private hemiLight!: THREE.HemisphereLight;
+  private dirLight!: THREE.DirectionalLight;
+  private controlPanel: HTMLElement | null = null;
 
   constructor(private readonly mount: HTMLElement) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
@@ -45,25 +51,36 @@ export class OceanApplication {
     this.renderer.setSize(mount.clientWidth, mount.clientHeight);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.0;
+    this.renderer.toneMappingExposure = 0.9;
     mount.appendChild(this.renderer.domElement);
 
-    this.camera = new THREE.PerspectiveCamera(55, mount.clientWidth / mount.clientHeight, 0.1, 200);
-    this.camera.position.set(12, 8, 13);
+    this.camera = new THREE.PerspectiveCamera(55, mount.clientWidth / mount.clientHeight, 0.1, 2000);
+    // Default pose: open water in front, sun ahead, island mid-frame — matches the reference shot.
+    this.camera.position.set(-12, 5.5, -13);
+    // Allow the camera to see the procedural sky (rendered on its own layer).
+    this.camera.layers.enable(SKY_LAYER);
 
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.target.set(0, SceneLayout.waterY, 0);
+    // Keep the camera above the water plane: cap the orbit polar angle so it can't dip below the
+    // horizon relative to the target, and disable panning so the user can't drag the target underwater.
+    this.controls.maxPolarAngle = Math.PI / 2 - 0.05;
+    this.controls.minDistance = 4;
+    this.controls.maxDistance = 80;
+    this.controls.enablePan = false;
     this.controls.update();
 
     this.depthPass = new DepthPrePassTarget();
 
-    this.opaqueScene.background = SceneLayout.skyColor;
+    // Sky mesh paints the full background; clear color is just a fallback for any uncovered pixels.
+    this.opaqueScene.background = null;
+    this.renderer.setClearColor(0x000000, 1);
     this.waterScene.background = null;
 
-    const hemi = new THREE.HemisphereLight(0xcfe8ff, 0x3a4a30, 0.85);
-    const dir = new THREE.DirectionalLight(0xffffff, 1.1);
-    dir.position.set(-4, 10, 6);
-    this.opaqueScene.add(hemi, dir);
+    this.hemiLight = new THREE.HemisphereLight(0xcfe8ff, 0x3a4a30, 0.6);
+    this.dirLight = new THREE.DirectionalLight(0xffffff, 1.1);
+    this.dirLight.position.set(-4, 10, 6);
+    this.opaqueScene.add(this.hemiLight, this.dirLight);
 
     window.addEventListener("resize", this.onResize);
   }
@@ -109,14 +126,29 @@ export class OceanApplication {
     this.oceanMesh.frustumCulled = false;
     this.waterScene.add(this.oceanMesh);
 
+    // === Sky + sun =========================================================
+    this.sky = createSky();
+    this.opaqueScene.add(this.sky.mesh);
+
+    this.sunController = new SunController({ hour: 17.5 });
+    this.sunController.bindSky(this.sky.uniforms);
+    this.sunController.bindOceanLight(this.oceanUniforms.uLightDirWorld);
+    // Push the sun color into the ocean too so specular highlights match the sky tint.
+    this.sunController.subscribe((_dir, color) => {
+      this.oceanUniforms.uSunColor.value.copy(color);
+    });
+    // Also drive the scene's directional light so opaque geometry (island, floor) catches sunset light.
+    this.sunController.subscribe(() => this.syncDirectionalLight());
+
+    this.buildControlPanel();
+
     this.onResize();
     this.renderer.setAnimationLoop(this.tick);
   }
 
   /**
    * Place the loaded grass tile (and clones of it) into an irregular L-shape so the demo exercises
-   * the shore SDF. The original tile is normalized to ~4×4 in {@link GrassTileLoader}, so we offset
-   * each placement by integer multiples of the tile size.
+   * the shore SDF.
    */
   private buildIslandLayout(template: THREE.Object3D): THREE.Object3D {
     const TILE = 4;
@@ -131,7 +163,6 @@ export class OceanApplication {
     const group = new THREE.Group();
     for (let i = 0; i < offsets.length; i++) {
       const [tx, tz] = offsets[i];
-      // First placement reuses the original (so grassDispose works without tracking clones).
       const node = i === 0 ? template : template.clone(true);
       const placement = new THREE.Group();
       placement.position.set(tx * TILE, 0, tz * TILE);
@@ -139,7 +170,6 @@ export class OceanApplication {
       group.add(placement);
     }
 
-    // Recenter the layout on the world origin for nicer camera framing.
     const box = new THREE.Box3().setFromObject(group);
     group.position.set(-(box.min.x + box.max.x) * 0.5, 0, -(box.min.z + box.max.z) * 0.5);
     return group;
@@ -169,10 +199,134 @@ export class OceanApplication {
     }
   }
 
+  /** Push the sun direction + warm color into the scene's directional light so opaque shading matches the sky. */
+  private syncDirectionalLight(): void {
+    const dir = this.sunController.direction;
+    // DirectionalLight.position is the point the light streams *from*, so use the sun direction directly.
+    this.dirLight.position.copy(dir).multiplyScalar(50);
+    this.dirLight.color.copy(this.sky.uniforms.uSunColor.value);
+    // Drop the light's brightness as the sun nears (and crosses) the horizon — at night the
+    // hemisphere light alone provides a tiny ambient so the scene isn't pitch black.
+    const el = this.sunController.elevationDeg;
+    const day = THREE.MathUtils.clamp(el / 25, 0, 1);
+    const night = THREE.MathUtils.clamp(-el / 6, 0, 1);
+    this.dirLight.intensity = (0.35 + 0.95 * day) * (1.0 - night);
+    this.hemiLight.intensity = 0.05 + (0.2 + 0.55 * day) * (1.0 - night * 0.7);
+    this.hemiLight.color.copy(this.sky.uniforms.uZenithColor.value);
+    this.hemiLight.groundColor.copy(this.sky.uniforms.uGroundColor.value);
+  }
+
+  // === Control panel =======================================================
+
+  private buildControlPanel(): void {
+    const panel = document.createElement("div");
+    panel.className = "ocean-demo-panel";
+    panel.style.cssText = [
+      "position:fixed",
+      "top:12px",
+      "right:12px",
+      "background:rgba(10,18,30,0.72)",
+      "color:#e8f1ff",
+      "font:12px/1.4 ui-monospace,Menlo,monospace",
+      "padding:10px 12px",
+      "border-radius:8px",
+      "z-index:10",
+      "backdrop-filter:blur(8px)",
+      "-webkit-backdrop-filter:blur(8px)",
+      "min-width:260px",
+      "box-shadow:0 6px 24px rgba(0,0,0,0.35)",
+    ].join(";");
+
+    const heading = (text: string) => {
+      const el = document.createElement("div");
+      el.textContent = text;
+      el.style.cssText = "font-weight:600;margin:6px 0 4px;letter-spacing:0.04em;opacity:0.85;";
+      panel.appendChild(el);
+    };
+
+    const slider = (
+      label: string,
+      min: number,
+      max: number,
+      step: number,
+      init: number,
+      onChange: (v: number) => void,
+      formatter: (v: number) => string = (v) => v.toFixed(2),
+    ) => {
+      const row = document.createElement("div");
+      row.style.cssText = "display:flex;align-items:center;gap:8px;margin:3px 0;";
+      const lbl = document.createElement("label");
+      lbl.style.cssText = "flex:0 0 92px;opacity:0.8;";
+      lbl.textContent = label;
+      const inp = document.createElement("input");
+      inp.type = "range";
+      inp.min = String(min);
+      inp.max = String(max);
+      inp.step = String(step);
+      inp.value = String(init);
+      inp.style.cssText = "flex:1;accent-color:#7dc4ff;";
+      const val = document.createElement("span");
+      val.style.cssText = "flex:0 0 46px;text-align:right;opacity:0.7;";
+      val.textContent = formatter(init);
+      inp.addEventListener("input", () => {
+        const v = parseFloat(inp.value);
+        val.textContent = formatter(v);
+        onChange(v);
+      });
+      row.append(lbl, inp, val);
+      panel.appendChild(row);
+    };
+
+    const title = document.createElement("div");
+    title.textContent = "Sun & Volumetric Clouds";
+    title.style.cssText = "font-weight:700;margin-bottom:6px;font-size:13px;";
+    panel.appendChild(title);
+
+    heading("Time of day");
+    const fmtClock = (v: number) => {
+      const h = Math.floor(v) % 24;
+      const m = Math.floor((v - Math.floor(v)) * 60);
+      return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+    };
+    slider(
+      "time",
+      0,
+      24,
+      0.05,
+      this.sunController.hour,
+      (v) => this.sunController.setHour(v),
+      fmtClock,
+    );
+
+    const u = this.sky.uniforms;
+    heading("Clouds");
+    slider("coverage", 0, 1, 0.01, u.uCloudCoverage.value, (v) => (u.uCloudCoverage.value = v));
+    slider("density", 0, 3, 0.05, u.uCloudDensity.value, (v) => (u.uCloudDensity.value = v));
+    slider("height", 20, 200, 1, u.uCloudHeight.value, (v) => (u.uCloudHeight.value = v));
+    slider("thickness", 2, 80, 0.5, u.uCloudThickness.value, (v) => (u.uCloudThickness.value = v));
+    slider("scale", 4, 80, 0.5, u.uCloudScale.value, (v) => (u.uCloudScale.value = v));
+    slider("speed", 0, 4, 0.05, u.uCloudSpeed.value, (v) => (u.uCloudSpeed.value = v));
+
+    document.body.appendChild(panel);
+    this.controlPanel = panel;
+  }
+
+  // === Frame loop ==========================================================
+
+  /** Minimum Y for the camera so the eye never sits at or below the water surface. */
+  private static readonly CAMERA_MIN_Y = SceneLayout.waterY + 0.6;
+
   private readonly tick = (): void => {
     const dt = this.clock.getDelta();
     this.controls.update();
+    // Belt-and-braces: even with polar-angle clamping, a sufficiently low target + tilt could still
+    // dip the camera below the water. Lift it back up if so.
+    if (this.camera.position.y < OceanApplication.CAMERA_MIN_Y) {
+      this.camera.position.y = OceanApplication.CAMERA_MIN_Y;
+      this.controls.update();
+    }
     this.oceanUniforms.uTime.value += dt;
+    this.sky.update(this.camera, dt);
 
     renderFrame({
       renderer: this.renderer,
@@ -204,6 +358,8 @@ export class OceanApplication {
     this.depthPass.dispose();
     this.shoreSdf?.dispose();
     this.grassDispose?.();
+    this.sky?.dispose();
+    this.controlPanel?.remove();
 
     if (this.oceanMesh) {
       this.oceanMesh.geometry.dispose();
