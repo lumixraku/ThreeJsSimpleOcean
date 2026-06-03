@@ -137,8 +137,13 @@ vec4 raymarchClouds(vec3 ro, vec3 rd, float mu) {
   float phase = mix(henyey(mu, -0.2), henyey(mu, 0.55), 0.7);
   const float scatterScale = 1.4;
 
-  // Ambient sky-light arriving from above each sample point.
-  vec3 ambient = mix(uHorizonColor, uZenithColor, 0.65) * 0.45;
+  // Ambient sky-light: a sample point sees the full hemisphere of sky overhead, so the shaded
+  // side of a cloud is never truly black — it's lit by the surrounding sky.
+  // We also add a cheap "multi-scattering" term tinted by the sun, since photons that entered the
+  // sunlit side bounce around and re-emerge everywhere. Without this term clouds read as black smoke.
+  vec3 ambientSky = mix(uHorizonColor, uZenithColor, 0.55) * 0.9;
+  vec3 ambientSun = uSunColor * 0.28;
+  vec3 ambient = ambientSky + ambientSun;
 
   // Small per-pixel jitter to break up banding from the fixed step count.
   float jitter = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
