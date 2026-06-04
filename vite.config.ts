@@ -4,6 +4,10 @@ export default defineConfig({
   root: ".",
   base: "./",
   publicDir: "public",
+  esbuild: {
+    jsx: "automatic",
+    jsxImportSource: "react",
+  },
   build: {
     outDir: "dist-demo",
     emptyOutDir: true,
