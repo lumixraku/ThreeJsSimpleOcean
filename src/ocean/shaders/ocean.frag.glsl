@@ -4,10 +4,14 @@ uniform vec3 uCameraPos;
 uniform vec3 uLightDirWorld;
 uniform vec3 uSunColor;
 
+uniform mat4 uViewMatrix;
+uniform mat4 projectionMatrix;
+
 uniform sampler2D uBaseColor;
 uniform sampler2D uNormalMap;
 uniform sampler2D uSceneDepth;
 uniform sampler2D uFoamMask;
+uniform sampler2D uReflectionMap;
 
 uniform float uTime;
 uniform vec2 uAlbedoScroll;
@@ -114,8 +118,25 @@ void main() {
   vec3 specular = vec3(spec) * uSpecStrength;
 
   // Fresnel rim — adds sky-tinted reflection at glancing angles.
+  // Reflection color comes from screen-space sampling of the PREVIOUS frame's final framebuffer
+  // (post-clouds), projected at the reflected ray's screen UV. Falls back to flat sky tint when
+  // the reflected ray points downward or its UV lands off-screen.
+  vec3 reflDir = reflect(-viewDir, n);
+  vec3 reflectColor = vec3(0.78, 0.88, 1.0);
+  // Treat reflDir as a direction at infinity (w=0): projection depends only on direction.
+  vec4 reflClip = projectionMatrix * uViewMatrix * vec4(reflDir, 0.0);
+  if (reflClip.w > 0.0) {
+    vec2 reflUv = (reflClip.xy / reflClip.w) * 0.5 + 0.5;
+    // Soft fade near screen edges to hide the cutoff.
+    vec2 edgeFade = smoothstep(0.0, 0.05, reflUv) * smoothstep(0.0, 0.05, 1.0 - reflUv);
+    float screenMask = edgeFade.x * edgeFade.y;
+    // Only trust upward-pointing reflections (sky/clouds), not sideways/down.
+    float upMask = smoothstep(0.0, 0.2, reflDir.y);
+    float blend = screenMask * upMask;
+    reflectColor = mix(reflectColor, texture2D(uReflectionMap, reflUv).rgb, blend);
+  }
   float fres = pow(1.0 - max(0.0, dot(n, viewDir)), 5.0);
-  vec3 fresnel = vec3(0.78, 0.88, 1.0) * fres * uFresnelStrength;
+  vec3 fresnel = reflectColor * fres * uFresnelStrength;
 
   vec3 surface = surfaceLit + specular + fresnel;
 

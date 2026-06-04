@@ -34,6 +34,8 @@ export type OceanMaterialUniforms = {
   uFoamMaskThreshold: THREE.IUniform<number>;
   uIslandBounds: THREE.IUniform<THREE.Vector4>;
   /** Baked shore distance field (RGBA8; R = clamped normalized distance from land). Uses a shared 1×1 black fallback when unused. */
+  /** Previous-frame final framebuffer (post-clouds). Sampled at the reflected ray's screen UV to put real sky+clouds into the fresnel term. Shared 1×1 black fallback when unbound. */
+  uReflectionMap: THREE.IUniform<THREE.Texture | null>;
   uShoreSdf: THREE.IUniform<THREE.Texture | null>;
   /** World XZ rectangle the SDF covers (minX, minZ, maxX, maxZ). */
   uShoreSdfBounds: THREE.IUniform<THREE.Vector4>;
@@ -58,6 +60,8 @@ export type OceanMaterialUniforms = {
   modelViewMatrix: THREE.IUniform<THREE.Matrix4>;
   projectionMatrix: THREE.IUniform<THREE.Matrix4>;
   normalMatrix: THREE.IUniform<THREE.Matrix3>;
+  /** World→view matrix (camera.matrixWorldInverse). Used by the fresnel sky-reflection path to project world-space reflected rays to screen UV. */
+  uViewMatrix: THREE.IUniform<THREE.Matrix4>;
 };
 
 export type OceanMaterialConfig = {
@@ -177,6 +181,23 @@ function getShoreSdfFallbackTexture(): THREE.DataTexture {
   return shoreSdfFallbackTexture;
 }
 
+/** Shared 1×1 transparent-black fallback for `uReflectionMap`. Same purpose as the shore SDF fallback. */
+let reflectionFallbackTexture: THREE.DataTexture | null = null;
+
+function getReflectionFallbackTexture(): THREE.DataTexture {
+  if (!reflectionFallbackTexture) {
+    reflectionFallbackTexture = new THREE.DataTexture(
+      new Uint8Array([0, 0, 0, 0]),
+      1,
+      1,
+      THREE.RGBAFormat,
+      THREE.UnsignedByteType,
+    );
+    reflectionFallbackTexture.needsUpdate = true;
+  }
+  return reflectionFallbackTexture;
+}
+
 export function createOceanMaterial(
   textures: OceanTextureBundle,
   depthTexture: THREE.DepthTexture,
@@ -212,6 +233,7 @@ export function createOceanMaterial(
     uFoamMaskScroll: { value: c.foamMaskScroll.clone() },
     uFoamMaskThreshold: { value: c.foamMaskThreshold },
     uIslandBounds: { value: new THREE.Vector4(-1, -1, 1, 1) },
+    uReflectionMap: { value: getReflectionFallbackTexture() },
     uShoreSdf: { value: getShoreSdfFallbackTexture() },
     uShoreSdfBounds: { value: new THREE.Vector4(-1, -1, 1, 1) },
     uShoreSdfMaxDistance: { value: 1 },
@@ -233,6 +255,7 @@ export function createOceanMaterial(
     modelViewMatrix: { value: new THREE.Matrix4() },
     projectionMatrix: { value: new THREE.Matrix4() },
     normalMatrix: { value: new THREE.Matrix3() },
+    uViewMatrix: { value: new THREE.Matrix4() },
   };
 
   const material = new THREE.RawShaderMaterial({
@@ -296,8 +319,17 @@ export function bindOceanMatrices(
 
   uniforms.uInverseProjection.value.copy(camera.projectionMatrixInverse);
   uniforms.uInverseView.value.copy(camera.matrixWorld);
+  uniforms.uViewMatrix.value.copy(camera.matrixWorldInverse);
 
   uniforms.uCameraPos.value.copy(camera.position);
   uniforms.uCameraNear.value = camera.near;
   uniforms.uCameraFar.value = camera.far;
+}
+
+/** Bind (or unbind) the previous-frame final framebuffer texture used by the fresnel reflection path. */
+export function setOceanReflectionMap(
+  uniforms: OceanMaterialUniforms,
+  texture: THREE.Texture | null,
+): void {
+  uniforms.uReflectionMap.value = texture ?? getReflectionFallbackTexture();
 }

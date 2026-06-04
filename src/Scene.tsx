@@ -23,6 +23,7 @@ import {
 import {
   bindOceanMatrices,
   createOceanMaterial,
+  setOceanReflectionMap,
   setOceanShoreSdf,
   type OceanMaterialUniforms,
 } from "./ocean/OceanMaterial";
@@ -151,13 +152,16 @@ function OceanLayer({
   }, []);
 
   const { material, uniforms } = useMemo(() => {
-    // surfaceBrightness 1.4 was tuned for the original ACES@0.9 pipeline; in the new pipeline
-    // (ACES @ 1.5 plus full atmosphere lighting) the base texture reads too punchy and the
-    // ocean ends up brighter than the sky.
     const r = createOceanMaterial(textures, depthPass.depthTexture, {
-      surfaceBrightness: 0.3,
+      surfaceBrightness: 0.7,
       displacement: 0.45,
-      heightScroll: new THREE.Vector2(0.02, 0.014),
+      heightScroll: new THREE.Vector2(0.00024, 0.00016),
+      albedoScroll: new THREE.Vector2(0.0012, 0.0008),
+      normalScroll: new THREE.Vector2(-0.0007, 0.0011),
+      specStrength: 0.3,
+      fresnelStrength: 0.28,
+      shallowAlpha: 0.15,
+      absorption: 1.0,
     });
     r.uniforms.uIslandBounds.value.copy(computeTileBoundsXZ(islandRoot, 0));
     return r;
@@ -173,19 +177,58 @@ function OceanLayer({
     return () => setOceanShoreSdf(uniforms, null);
   }, [uniforms, shoreSdf]);
 
+  // Reflection map: previous frame's final framebuffer (post-clouds, post-tonemap), copied into
+  // a render target after the EffectComposer pass. Sampled in the ocean shader's fresnel path
+  // via the reflected ray's screen UV, giving water a real reflection of the sky+clouds at no
+  // cost beyond one full-frame `copyFramebufferToTexture` per frame (+1-frame lag, invisible).
+  const reflectionRT = useMemo(
+    () =>
+      new THREE.WebGLRenderTarget(1, 1, {
+        minFilter: THREE.LinearFilter,
+        magFilter: THREE.LinearFilter,
+        format: THREE.RGBAFormat,
+        type: THREE.UnsignedByteType,
+        generateMipmaps: false,
+        depthBuffer: false,
+        stencilBuffer: false,
+      }),
+    [],
+  );
+
+  useEffect(() => {
+    setOceanReflectionMap(uniforms, reflectionRT.texture);
+    return () => setOceanReflectionMap(uniforms, null);
+  }, [uniforms, reflectionRT]);
+
   useEffect(
     () => () => {
       geometry.dispose();
       material.dispose();
       depthPass.dispose();
       shoreSdf.dispose();
+      reflectionRT.dispose();
     },
-    [geometry, material, depthPass, shoreSdf],
+    [geometry, material, depthPass, shoreSdf, reflectionRT],
   );
+
+  const tmpSize = useMemo(() => new THREE.Vector2(), []);
+
+  // Priority 2 runs AFTER the EffectComposer (priority 1), so the canvas backbuffer holds the
+  // fully composited frame (sky + clouds + ocean + tonemap). Copy it into reflectionRT so the
+  // ocean shader can sample it as "what's above this water pixel" on the NEXT frame.
+  useFrame((state) => {
+    state.gl.getDrawingBufferSize(tmpSize);
+    if (
+      reflectionRT.width !== tmpSize.x ||
+      reflectionRT.height !== tmpSize.y
+    ) {
+      reflectionRT.setSize(tmpSize.x, tmpSize.y);
+    }
+    state.gl.copyFramebufferToTexture(reflectionRT.texture);
+  }, 2);
 
   // Depth pre-pass + per-frame uniform sync. Priority -1 runs before the EffectComposer
   // (which registers itself at priority 1), so we own the depth target before the main render.
-  const tmpSize = useMemo(() => new THREE.Vector2(), []);
   useFrame((state, dt) => {
     const mesh = meshRef.current;
     if (mesh == null) return;
@@ -352,9 +395,9 @@ function SceneContent() {
             skyLightScale={3.5}
             scatterAnisotropy1={0.4}
             scatterAnisotropyMix={0.7}
-            localWeatherVelocity={[0.004, 0]}
-            shapeVelocity={[0.006, 0, 0.002]}
-            shapeDetailVelocity={[0.009, 0, 0.003]}
+            localWeatherVelocity={[0.00133, 0]}
+            shapeVelocity={[0.002, 0, 0.000667]}
+            shapeDetailVelocity={[0.003, 0, 0.001]}
             shadow-maxFar={1e5}
             disableDefaultLayers
           >
