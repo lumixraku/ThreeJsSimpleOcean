@@ -90,6 +90,7 @@ void main() {
 
   // Reconstruct world position of underwater geometry behind this pixel.
   float sceneDepth = texture2D(uSceneDepth, screenUv).r;
+  if (sceneDepth + 0.0002 < gl_FragCoord.z) discard;
   vec3 floorWorld = reconstructWorldPos(screenUv, sceneDepth);
 
   // World-space water column (angle-independent).
@@ -117,32 +118,35 @@ void main() {
   float spec = pow(max(0.0, dot(R, viewDir)), 80.0);
   vec3 specular = vec3(spec) * uSpecStrength;
 
-  // Fresnel rim — adds sky-tinted reflection at glancing angles.
-  // Reflection color comes from screen-space sampling of the PREVIOUS frame's final framebuffer
-  // (post-clouds), projected at the reflected ray's screen UV. Falls back to flat sky tint when
-  // the reflected ray points downward or its UV lands off-screen.
-  vec3 reflDir = reflect(-viewDir, n);
-  vec3 reflectColor = vec3(0.78, 0.88, 1.0);
-  // Treat reflDir as a direction at infinity (w=0): projection depends only on direction.
-  vec4 reflClip = projectionMatrix * uViewMatrix * vec4(reflDir, 0.0);
-  if (reflClip.w > 0.0) {
-    vec2 reflUv = (reflClip.xy / reflClip.w) * 0.5 + 0.5;
-    // Soft fade near screen edges to hide the cutoff.
-    vec2 edgeFade = smoothstep(0.0, 0.05, reflUv) * smoothstep(0.0, 0.05, 1.0 - reflUv);
-    float screenMask = edgeFade.x * edgeFade.y;
-    // Only trust upward-pointing reflections (sky/clouds), not sideways/down.
-    float upMask = smoothstep(0.0, 0.2, reflDir.y);
-    float blend = screenMask * upMask;
-    reflectColor = mix(reflectColor, texture2D(uReflectionMap, reflUv).rgb, blend);
-  }
+  // Pure Schlick Fresnel reflection.
+  // Near camera (looking down at water) → dot(n,v) ≈ 1 → fres ≈ 0 → transparent.
+  // Near horizon (grazing angle)        → dot(n,v) ≈ 0 → fres ≈ 1 → reflects sky.
   float fres = pow(1.0 - max(0.0, dot(n, viewDir)), 5.0);
-  vec3 fresnel = reflectColor * fres * uFresnelStrength;
+  float reflectionAmount = clamp(fres * uFresnelStrength, 0.0, 1.0);
+  float viewDistance = length(uCameraPos.xz - vWorldPos.xz);
 
-  vec3 surface = surfaceLit + specular + fresnel;
+  // Screen-space reflection: mirror screen UV across the horizon line to sample the pre-water
+  // framebuffer (sky+clouds+island, no ocean feedback). Water pixels [0..horizonUvY] map to sky
+  // pixels [horizonUvY..2*horizonUvY], so water just below horizon reflects sky just above it,
+  // water at the camera's feet reflects high up in the sky.
+  vec3 cameraForward = normalize((uInverseView * vec4(0.0, 0.0, -1.0, 0.0)).xyz);
+  vec3 horizonForward = normalize(vec3(cameraForward.x, 0.0, cameraForward.z));
+  vec4 horizonClip = projectionMatrix * uViewMatrix * vec4(horizonForward, 0.0);
+  float horizonUvY = clamp((horizonClip.y / max(horizonClip.w, 1e-6)) * 0.5 + 0.5, 0.02, 0.98);
+
+  vec2 reflectedUv = vec2(screenUv.x, 2.0 * horizonUvY - screenUv.y);
+  reflectedUv += n.xz * vec2(0.015, 0.03) * reflectionAmount;
+  vec2 edgeFade = smoothstep(0.0, 0.03, reflectedUv) * smoothstep(0.0, 0.03, 1.0 - reflectedUv);
+  reflectionAmount *= edgeFade.x * edgeFade.y;
+
+  vec3 reflectColor = texture2D(uReflectionMap, clamp(reflectedUv, 0.0, 1.0)).rgb;
+
+  vec3 surface = surfaceLit + specular;
 
   // === DEPTH TINT ===
   // Mix surface toward deepColor by depthT, capped so the texture is never fully erased.
   vec3 color = mix(surface, uDeepColor, depthT * uDepthTintAmount);
+  color = mix(color, reflectColor, reflectionAmount);
 
   // === FOAM ===
   // View-angle independent: world-space horizontal distance from this water pixel to the actual shore.
@@ -216,7 +220,10 @@ void main() {
 
   // === ALPHA ===
   // Shallow water is more transparent (you see underwater geometry through it).
+  float transparencyDistance = smoothstep(4.0, 45.0, viewDistance);
   float alpha = mix(uShallowAlpha, uDeepAlpha, depthT);
+  alpha = mix(alpha, 0.18, 1.0 - transparencyDistance);
+  alpha = mix(alpha, 0.94, reflectionAmount);
   alpha = mix(alpha, 1.0, foam);
 
   gl_FragColor = vec4(color, clamp(alpha, 0.0, 1.0));

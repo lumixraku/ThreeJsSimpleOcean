@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
 import { EffectComposer, ToneMapping } from "@react-three/postprocessing";
@@ -48,6 +48,7 @@ const CAMERA_MIN_Y = WATER_Y + 0.6;
 
 const SUN_DAY = new THREE.Color(1.0, 0.96, 0.88);
 const SUN_NIGHT = new THREE.Color(0.06, 0.07, 0.1);
+const OCEAN_RENDER_LAYER = 2;
 
 // Anchor the scene origin onto the WGS84 ellipsoid so the atmosphere/sun math has a real frame.
 const SCENE_LONGITUDE = 0;
@@ -159,7 +160,7 @@ function OceanLayer({
       albedoScroll: new THREE.Vector2(0.0012, 0.0008),
       normalScroll: new THREE.Vector2(-0.0007, 0.0011),
       specStrength: 0.3,
-      fresnelStrength: 0.28,
+      fresnelStrength: 1.0,
       shallowAlpha: 0.15,
       absorption: 1.0,
     });
@@ -177,10 +178,15 @@ function OceanLayer({
     return () => setOceanShoreSdf(uniforms, null);
   }, [uniforms, shoreSdf]);
 
-  // Reflection map: previous frame's final framebuffer (post-clouds, post-tonemap), copied into
-  // a render target after the EffectComposer pass. Sampled in the ocean shader's fresnel path
-  // via the reflected ray's screen UV, giving water a real reflection of the sky+clouds at no
-  // cost beyond one full-frame `copyFramebufferToTexture` per frame (+1-frame lag, invisible).
+  useLayoutEffect(() => {
+    const mesh = meshRef.current;
+    if (!mesh) return;
+    mesh.layers.set(OCEAN_RENDER_LAYER);
+  }, []);
+
+  // Reflection map: framebuffer after the EffectComposer pass but before the ocean draw. The ocean
+  // mesh lives on OCEAN_RENDER_LAYER, so composer renders sky/clouds/island without water. We then
+  // copy that no-water frame for reflection and draw only the ocean layer on top.
   const reflectionRT = useMemo(
     () =>
       new THREE.WebGLRenderTarget(1, 1, {
@@ -213,18 +219,44 @@ function OceanLayer({
 
   const tmpSize = useMemo(() => new THREE.Vector2(), []);
 
-  // Priority 2 runs AFTER the EffectComposer (priority 1), so the canvas backbuffer holds the
-  // fully composited frame (sky + clouds + ocean + tonemap). Copy it into reflectionRT so the
-  // ocean shader can sample it as "what's above this water pixel" on the NEXT frame.
+  // Priority 2 runs AFTER the EffectComposer (priority 1). Build a reflection map of the
+  // post-composer frame (sky + clouds + island, no water) and then render the ocean on top.
+  //
+  // Step 1: render the no-water scene to reflectionRT. This forces GPU allocation of the texture
+  // at the current size, dodging the "Offset overflows" crash that bare copyFramebufferToTexture
+  // hits on the lazily-allocated 1×1 default.
+  // Step 2: copyFramebufferToTexture overlays the post-effects canvas FB (which DOES contain the
+  // clouds postprocessing pass) onto the now-allocated texture.
   useFrame((state) => {
     state.gl.getDrawingBufferSize(tmpSize);
-    if (
-      reflectionRT.width !== tmpSize.x ||
-      reflectionRT.height !== tmpSize.y
-    ) {
+    if (reflectionRT.width !== tmpSize.x || reflectionRT.height !== tmpSize.y) {
       reflectionRT.setSize(tmpSize.x, tmpSize.y);
     }
-    state.gl.copyFramebufferToTexture(reflectionRT.texture);
+
+    const cam = state.camera as THREE.PerspectiveCamera;
+    const prevLayers = cam.layers.mask;
+    const prevAutoClear = state.gl.autoClear;
+    const prevRT = state.gl.getRenderTarget();
+
+    // Force-allocate the texture at the right size by rendering anything to it.
+    cam.layers.disable(OCEAN_RENDER_LAYER);
+    state.gl.autoClear = true;
+    state.gl.setRenderTarget(reflectionRT);
+    state.gl.render(scene, cam);
+    state.gl.setRenderTarget(prevRT);
+
+    // Now overlay the actual post-composer image (with clouds) on top.
+    state.gl.copyFramebufferToTexture(reflectionRT.texture, new THREE.Vector2(0, 0));
+
+    // Render just the ocean layer on top of the canvas backbuffer.
+    cam.layers.set(OCEAN_RENDER_LAYER);
+    state.gl.autoClear = false;
+    try {
+      state.gl.render(scene, cam);
+    } finally {
+      cam.layers.mask = prevLayers;
+      state.gl.autoClear = prevAutoClear;
+    }
   }, 2);
 
   // Depth pre-pass + per-frame uniform sync. Priority -1 runs before the EffectComposer

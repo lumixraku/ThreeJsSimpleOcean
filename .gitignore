@@ -8,3 +8,4 @@ examples/**/dist/
 .cursor
 .codex
 ./.codex*
+.tmp/

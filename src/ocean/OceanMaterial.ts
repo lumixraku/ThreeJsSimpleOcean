@@ -34,7 +34,7 @@ export type OceanMaterialUniforms = {
   uFoamMaskThreshold: THREE.IUniform<number>;
   uIslandBounds: THREE.IUniform<THREE.Vector4>;
   /** Baked shore distance field (RGBA8; R = clamped normalized distance from land). Uses a shared 1×1 black fallback when unused. */
-  /** Previous-frame final framebuffer (post-clouds). Sampled at the reflected ray's screen UV to put real sky+clouds into the fresnel term. Shared 1×1 black fallback when unbound. */
+  /** Previous-frame final framebuffer (post-clouds). Sampled at reflected-direction screen UVs for the fresnel reflection term. Shared 1×1 black fallback when unbound. */
   uReflectionMap: THREE.IUniform<THREE.Texture | null>;
   uShoreSdf: THREE.IUniform<THREE.Texture | null>;
   /** World XZ rectangle the SDF covers (minX, minZ, maxX, maxZ). */
@@ -60,7 +60,7 @@ export type OceanMaterialUniforms = {
   modelViewMatrix: THREE.IUniform<THREE.Matrix4>;
   projectionMatrix: THREE.IUniform<THREE.Matrix4>;
   normalMatrix: THREE.IUniform<THREE.Matrix3>;
-  /** World→view matrix (camera.matrixWorldInverse). Used by the fresnel sky-reflection path to project world-space reflected rays to screen UV. */
+  /** World→view matrix (camera.matrixWorldInverse). Kept available for shader extensions that need camera-space projection. */
   uViewMatrix: THREE.IUniform<THREE.Matrix4>;
 };
 
@@ -156,7 +156,7 @@ const defaultConfig: OceanMaterialConfig = {
   depthTintAmount: 0.55,
   surfaceBrightness: 1.4,
   specStrength: 0.9,
-  fresnelStrength: 0.28,
+  fresnelStrength: 1.0,
 };
 
 /** Shared 1x1 black RGBA8 fallback for `uShoreSdf` — one GPU allocation for all ocean materials. */
@@ -264,7 +264,7 @@ export function createOceanMaterial(
     uniforms: uniforms as unknown as { [key: string]: THREE.IUniform<unknown> },
     transparent: true,
     depthWrite: false,
-    depthTest: true,
+    depthTest: false,
     side: THREE.FrontSide,
   });
 
