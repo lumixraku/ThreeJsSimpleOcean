@@ -156,6 +156,8 @@ function OceanLayer({
     // ocean ends up brighter than the sky.
     const r = createOceanMaterial(textures, depthPass.depthTexture, {
       surfaceBrightness: 0.3,
+      displacement: 0.45,
+      heightScroll: new THREE.Vector2(0.02, 0.014),
     });
     r.uniforms.uIslandBounds.value.copy(computeTileBoundsXZ(islandRoot, 0));
     return r;
@@ -284,17 +286,21 @@ const ecef = new THREE.Vector3();
 
 function SceneContent() {
   const atmosphereRef = useRef<AtmosphereApi | null>(null);
+  const atmosphereReadyRef = useRef(false);
   const assets = useSceneAssets();
   const islandRoot = useMemo(
     () => (assets ? buildIslandLayout(assets.grass.root) : null),
     [assets],
   );
 
-  // Match the three-clouds-demo pattern: push date + scene→ECEF frame into AtmosphereApi every
-  // frame BEFORE downstream Sky/SkyLight/SunLight/Clouds (priority 0) copy state from the api.
-  // Putting this in useEffect raced ref population in StrictMode and left worldToECEFMatrix as
-  // identity, which placed the scene at the center of the Earth — sky/clouds were unusable.
+  // Push date + scene→ECEF frame into AtmosphereApi ONCE so Sky/SkyLight/SunLight/Clouds pick up
+  // a stable transform. Rewriting worldToECEFMatrix every frame (as the three-clouds-demo does)
+  // invalidates the volumetric cloud temporal accumulation — the TAA reprojection treats the
+  // mutated matrix as a camera transform change and rejects history every frame, leaving the
+  // Bayer dither pattern visible as static sparkle around cloud edges. We use a ref guard
+  // (instead of useEffect) so we don't race the <Atmosphere> ref population.
   useFrame(() => {
+    if (atmosphereReadyRef.current) return;
     const atm = atmosphereRef.current;
     if (atm == null) return;
     atm.updateByDate(SCENE_DATE);
@@ -307,6 +313,7 @@ function SceneContent() {
       geodetic.toECEF(ecef),
       atm.worldToECEFMatrix,
     );
+    atmosphereReadyRef.current = true;
   }, -1);
 
   return (
@@ -338,10 +345,16 @@ function SceneContent() {
             coverage={0.2}
             qualityPreset="ultra"
             turbulence={false}
+            lightShafts={false}
+            shapeDetail={false}
+            haze={false}
             powderScale={0}
             skyLightScale={3.5}
             scatterAnisotropy1={0.4}
             scatterAnisotropyMix={0.7}
+            localWeatherVelocity={[0.004, 0]}
+            shapeVelocity={[0.006, 0, 0.002]}
+            shapeDetailVelocity={[0.009, 0, 0.003]}
             shadow-maxFar={1e5}
             disableDefaultLayers
           >

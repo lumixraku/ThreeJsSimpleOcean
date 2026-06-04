@@ -2,6 +2,8 @@
 
 Three.js **ocean surface** material: scrolling height and normal maps, depth-aware absorption, and shoreline foam. Includes a small **render helper** that matches what the shader expects (opaque depth pre-pass + transparent water pass).
 
+![Demo screenshot](docs/preview.jpg)
+
 This hasn't been tested with scale and has no underwater filters or anything.
 
 I just use a small amount in a fairly light game.
