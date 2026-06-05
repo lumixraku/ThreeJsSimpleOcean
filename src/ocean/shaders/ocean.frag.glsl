@@ -168,10 +168,15 @@ void main() {
   // *down* could land on the sea-floor strip of the SSR frame (uReflectionMap renders the scene
   // with no water), producing a dark stripe at the water's horizon line.
   reflectedUv.x += n.x * 0.012;
-  // Single SSR sample — earlier we did a 3-tap vertical blur to soften the bright cloud peak,
-  // but the Schlick curve is already smooth and the blur produced visible "ghost duplicates" of
-  // each cloud at different vertical offsets.
-  vec3 reflectColor = texture2D(uReflectionMap, clamp(reflectedUv, 0.0, 1.0)).rgb;
+  // Out-of-range guard. The mirror trick only matches a real reflection while the camera is
+  // ~level; once it tilts down, horizonUvY moves toward the top of the screen and reflectedUv.y
+  // runs past 1.0 for most foreground water. Clamping then samples the top row of the SSR frame
+  // (which contains the mountain horizon silhouette) and smears that strip across the foreground
+  // as a banding artifact. Fade to the uniform sky tint where the sample would have to be clamped
+  // so the bad region just reads as a flat sky-blue instead of a smeared mountain.
+  float reflectInRange = 1.0 - smoothstep(0.95, 1.05, reflectedUv.y);
+  vec3 ssrSample = texture2D(uReflectionMap, clamp(reflectedUv, 0.0, 1.0)).rgb;
+  vec3 reflectColor = mix(uReflectionTint, ssrSample, reflectInRange);
 
   vec3 surface = surfaceLit + specular;
 
