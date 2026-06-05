@@ -202,6 +202,12 @@ void main() {
   float ringEnabled = smoothstep(0.0, 0.005, uFoamBaseRingWidth);
   float innerRing = ringEnabled * (1.0 - smoothstep(0.0, max(uFoamBaseRingWidth, 1e-6), worldColumn));
   innerRing = pow(innerRing, 0.7);
+  // Near-land gate: only show the contact ring where the SDF/AABB says we are close to real
+  // shore geometry. Without this, ANY shallow depth caster (e.g. a wooden post in open water)
+  // would inherit a foam ring at its waterline just because worldColumn is small there.
+  // distOutsideIsland is 0 at the shore and saturates at the SDF max distance far away.
+  float nearLand = 1.0 - smoothstep(0.0, 0.5, distOutsideIsland);
+  innerRing *= nearLand;
 
   // --- Outer foam (independent) ---
   // Foam mask: two scrolling world-XZ samples for non-tiling animated patches.

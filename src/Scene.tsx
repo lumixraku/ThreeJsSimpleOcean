@@ -40,6 +40,7 @@ import {
   makeGrassPlaceholder,
   type GrassLoadResult,
 } from "./stage/GrassTileLoader";
+import { buildMountainRing } from "./stage/MountainRing";
 
 const WATER_Y = 1.5;
 const FLOOR_Y = -2.0;
@@ -335,6 +336,173 @@ function DepthCasterTag({ object }: { object: THREE.Object3D }) {
   return <primitive object={object} />;
 }
 
+function MountainHorizon() {
+  // Two layered ridges over the SAME ~50° arc behind the island (relative to the default
+  // camera). Near ridge shorter/closer, far ridge taller/farther. AerialPerspective tints them
+  // toward sky color, producing the dark-navy distant silhouette read. The ocean's SSR picks
+  // them up because they live on the default layer (no special tagging needed).
+  const arcCenter = Math.PI / 4;
+  const arcWidth = (50 * Math.PI) / 180;
+  const rings = useMemo(
+    () => [
+      buildMountainRing({
+        radius: 3500,
+        baseY: -30,
+        minHeight: 40,
+        maxHeight: 220,
+        segments: 512,
+        color: new THREE.Color(0.18, 0.16, 0.14),
+        seed: 53,
+        arcCenter,
+        arcWidth,
+        endFade: 0.18,
+      }),
+      buildMountainRing({
+        radius: 5200,
+        baseY: -40,
+        minHeight: 120,
+        maxHeight: 460,
+        segments: 512,
+        color: new THREE.Color(0.13, 0.12, 0.12),
+        seed: 17,
+        arcCenter,
+        arcWidth,
+        endFade: 0.18,
+      }),
+    ],
+    [arcCenter, arcWidth],
+  );
+  useEffect(
+    () => () => {
+      for (const r of rings) r.dispose();
+    },
+    [rings],
+  );
+  return (
+    <group position={[0, WATER_Y, 0]}>
+      {rings.map((r, i) => (
+        <primitive key={i} object={r.mesh} />
+      ))}
+    </group>
+  );
+}
+
+function WaterPosts() {
+  // Remnant wooden pier: a curving line of pilings with cross-beams connecting most adjacent
+  // pairs (some missing, suggesting weathering). Each piling has its own height, tilt and
+  // slight radial offset, so the structure reads as varied and decayed — not regimented.
+  //
+  // Default layer (not OCEAN_RENDER_LAYER) so the meshes land in the reflection RT and SSR
+  // picks them up; tagged as depth casters so the water shader cuts the above-water portion
+  // through the transparent water plane (and the new near-land gate in ocean.frag.glsl
+  // suppresses the foam contact ring around them).
+  const built = useMemo(() => {
+    const group = new THREE.Group();
+    const material = new THREE.MeshStandardMaterial({
+      color: new THREE.Color(0.13, 0.07, 0.04), // dark weathered wood
+      roughness: 0.95,
+      metalness: 0,
+    });
+    // Two shared unit geometries; per-instance scale.y sets length.
+    const postGeom = new THREE.CylinderGeometry(0.14, 0.18, 1, 10, 1);
+    const beamGeom = new THREE.CylinderGeometry(0.07, 0.07, 1, 6, 1);
+
+    // Deterministic hash → [0, 1).
+    const rand = (i: number, s: number): number => {
+      const v = Math.sin(i * 12.9898 + s * 78.233) * 43758.5453;
+      return v - Math.floor(v);
+    };
+
+    const N = 28;
+    const baseRadius = 115;          // pushed further out
+    const arcCenter = Math.PI / 4;    // +X +Z — default camera look direction
+    const sweep = 0.95;               // wider arc (≈ 54°)
+    const submerged = 2.8;
+    const seed = 9001;
+
+    type Post = { x: number; z: number; topY: number };
+    const posts: Post[] = [];
+
+    for (let i = 0; i < N; i++) {
+      const t = i / (N - 1) - 0.5;
+      const angleBase = arcCenter + t * sweep;
+      // Tangential jitter: shift along the arc by up to ~half a slot, breaks the regular spacing
+      // so adjacent posts can clump or open a gap — reads as "naturally distributed", not "rail".
+      const slotSize = sweep / Math.max(1, N - 1);
+      const angle = angleBase + (rand(i, seed + 700) - 0.5) * slotSize * 1.0;
+      // Radial jitter: ±9m off the main arc, so the row has actual depth/width.
+      const r = baseRadius + (rand(i, seed) - 0.5) * 18;
+      const x = Math.cos(angle) * r;
+      const z = Math.sin(angle) * r;
+
+      // Wider above-water range: 0.25m short stumps up to 3.4m tall intact pilings.
+      const aboveWater = 0.25 + rand(i, seed + 100) * 3.15;
+      const len = aboveWater + submerged;
+      const topY = WATER_Y + aboveWater;
+      const centerY = topY - len / 2;
+
+      // Heavier tilts (±~17°) for the more decayed look.
+      const tiltX = (rand(i, seed + 200) - 0.5) * 0.30;
+      const tiltZ = (rand(i, seed + 300) - 0.5) * 0.30;
+
+      const mesh = new THREE.Mesh(postGeom, material);
+      mesh.scale.set(1, len, 1);
+      mesh.position.set(x, centerY, z);
+      mesh.rotation.set(tiltX, 0, tiltZ);
+      mesh.castShadow = false;
+      mesh.receiveShadow = false;
+      mesh.matrixAutoUpdate = false;
+      mesh.updateMatrix();
+      group.add(mesh);
+
+      posts.push({ x, z, topY });
+    }
+
+    // Cross-beams between adjacent posts. Skip if either post is too short (stumps don't
+    // hold a rail), if they're too far apart (radial jitter pulled them apart), or randomly
+    // (40% missing — more decay than the previous 25%).
+    const Y_AXIS = new THREE.Vector3(0, 1, 0);
+    for (let i = 0; i < N - 1; i++) {
+      const a = posts[i];
+      const b = posts[i + 1];
+      if (a.topY < WATER_Y + 0.8 || b.topY < WATER_Y + 0.8) continue;
+      const gap = Math.hypot(a.x - b.x, a.z - b.z);
+      if (gap > 12) continue;
+      if (rand(i, seed + 500) < 0.40) continue;
+
+      // Drop beam slightly below the post tops so it reads as attached, not floating.
+      const inset = 0.15;
+      const p1 = new THREE.Vector3(a.x, a.topY - inset, a.z);
+      const p2 = new THREE.Vector3(b.x, b.topY - inset, b.z);
+      const dir = new THREE.Vector3().subVectors(p2, p1);
+      const len = dir.length();
+      const mid = new THREE.Vector3().addVectors(p1, p2).multiplyScalar(0.5);
+
+      const beam = new THREE.Mesh(beamGeom, material);
+      beam.scale.set(1, len, 1);
+      beam.position.copy(mid);
+      beam.quaternion.setFromUnitVectors(Y_AXIS, dir.normalize());
+      beam.castShadow = false;
+      beam.receiveShadow = false;
+      beam.matrixAutoUpdate = false;
+      beam.updateMatrix();
+      group.add(beam);
+    }
+
+    return {
+      group,
+      dispose: () => {
+        postGeom.dispose();
+        beamGeom.dispose();
+        material.dispose();
+      },
+    };
+  }, []);
+
+  useEffect(() => () => built.dispose(), [built]);
+  return <DepthCasterTag object={built.group} />;
+}
+
 function OceanFloor() {
   const meshRef = useRef<THREE.Mesh>(null);
   useEffect(() => {
@@ -404,10 +572,12 @@ function SceneContent() {
         <Sky />
         <SkyLight />
         <SunLight />
+        <MountainHorizon />
         {islandRoot && assets && (
           <>
             <DepthCasterTag object={islandRoot} />
             <OceanFloor />
+            <WaterPosts />
             <OceanLayer
               textures={assets.textures}
               islandRoot={islandRoot}
