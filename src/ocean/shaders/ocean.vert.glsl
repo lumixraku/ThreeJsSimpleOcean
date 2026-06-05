@@ -14,13 +14,10 @@ uniform float uDisplacement;
 attribute vec3 position;
 attribute vec3 normal;
 attribute vec2 uv;
-attribute vec4 tangent;
 
 varying vec2 vUv;
 varying vec3 vWorldPos;
 varying vec3 vWorldNormal;
-varying vec3 vWorldTangent;
-varying vec3 vWorldBitangent;
 
 void main() {
   vUv = uv;
@@ -38,12 +35,7 @@ void main() {
   vec4 world = modelMatrix * vec4(displaced, 1.0);
   vWorldPos = world.xyz;
 
-  vec3 n = normalize(mat3(modelMatrix) * normal);
-  vec3 t = normalize(mat3(modelMatrix) * tangent.xyz);
-  vec3 b = normalize(cross(n, t) * tangent.w);
-  vWorldNormal = n;
-  vWorldTangent = t;
-  vWorldBitangent = b;
+  vWorldNormal = normalize(mat3(modelMatrix) * normal);
 
   gl_Position = projectionMatrix * modelViewMatrix * vec4(displaced, 1.0);
 }

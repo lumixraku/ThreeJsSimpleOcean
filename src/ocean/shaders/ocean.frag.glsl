@@ -56,8 +56,6 @@ uniform mat4 uInverseView;
 varying vec2 vUv;
 varying vec3 vWorldPos;
 varying vec3 vWorldNormal;
-varying vec3 vWorldTangent;
-varying vec3 vWorldBitangent;
 
 vec3 reconstructWorldPos(vec2 screenUv, float depth) {
   vec4 ndc = vec4(screenUv * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
@@ -68,24 +66,40 @@ vec3 reconstructWorldPos(vec2 screenUv, float depth) {
 }
 
 /**
- * Sample base color and tangent-space normal from TWO layers at different scales,
- * then blend so the surface doesn't look obviously tiled and base/normal stay coherent
- * within each layer (no "two surfaces drifting apart" look).
+ * Canonical Three.js Water `getNoise`: 4 taps of the normal map at four wildly different
+ * scales/scrolls, summed to break visible tiling and produce the cross-scale wave interference
+ * that gives the official Water demo its look. Each component of the result lives in [-1, 1].
+ */
+vec4 getWaterNoise(vec2 uv) {
+  vec2 uv0 = (uv / 103.0) + vec2(uTime / 17.0, uTime / 29.0);
+  vec2 uv1 = uv / 107.0 - vec2(uTime / -19.0, uTime / 31.0);
+  vec2 uv2 = uv / vec2(8907.0, 9803.0) + vec2(uTime / 101.0, uTime / 97.0);
+  vec2 uv3 = uv / vec2(1091.0, 1027.0) - vec2(uTime / 109.0, uTime / -113.0);
+  vec4 n = texture2D(uNormalMap, uv0)
+         + texture2D(uNormalMap, uv1)
+         + texture2D(uNormalMap, uv2)
+         + texture2D(uNormalMap, uv3);
+  return n * 0.5 - 1.0;
+}
+
+/**
+ * Base color stays on the existing two-layer cross-fade. The surface normal switches to the
+ * canonical Water noise, driven by world XZ (so wavelength is locked to world units, not mesh
+ * UV tessellation). The plane is flat — vWorldNormal is world up — so the noise vector is
+ * already in a world-aligned basis and we skip the TBN transform.
+ *
+ * Swizzle .xzy maps the normal map's B-as-up tangent convention into world Y-up.
+ * The (1.5, 1.0, 1.5) bias exaggerates the horizontal tilt the way official Water does.
  */
 void sampleSurface(out vec3 baseSample, out vec3 nWorld) {
   vec2 uvA = vUv * uSurfaceTiling + uTime * uAlbedoScroll;
   vec2 uvB = vUv * (uSurfaceTiling * 0.55) + uTime * uNormalScroll;
-
   vec3 baseA = texture2D(uBaseColor, uvA).rgb;
   vec3 baseB = texture2D(uBaseColor, uvB).rgb;
   baseSample = mix(baseA, baseB, 0.5);
 
-  vec3 nLocalA = texture2D(uNormalMap, uvA).xyz * 2.0 - 1.0;
-  vec3 nLocalB = texture2D(uNormalMap, uvB).xyz * 2.0 - 1.0;
-  vec3 nLocal = normalize(nLocalA + nLocalB);
-
-  mat3 tbn = mat3(vWorldTangent, vWorldBitangent, vWorldNormal);
-  nWorld = normalize(tbn * nLocal);
+  vec4 noise = getWaterNoise(vWorldPos.xz);
+  nWorld = normalize(vec3(noise.x, noise.z, noise.y) * vec3(1.5, 1.0, 1.5));
 }
 
 void main() {
@@ -116,10 +130,12 @@ void main() {
   surfaceAlbedo = mix(surfaceAlbedo, surfaceAlbedo * uShallowColor * 2.0, 0.5);
   vec3 surfaceLit = surfaceAlbedo * (0.55 + 0.45 * ndotl);
 
-  // Specular twinkle from the normal map — always visible (this is how you "see" the normals).
+  // Canonical Three.js Water sun specular: a sharp pow100 highlight tinted by the atmosphere-
+  // synced sun color. The factor of 2 matches Water's `spec=2.0` argument to sunLight().
+  // uSpecStrength keeps the existing tunable so values from the old shader still mean something.
   vec3 R = reflect(-lightDir, n);
-  float spec = pow(max(0.0, dot(R, viewDir)), 80.0);
-  vec3 specular = vec3(spec) * uSpecStrength;
+  float spec = pow(max(0.0, dot(R, viewDir)), 100.0);
+  vec3 specular = uSunColor * (2.0 * spec * uSpecStrength);
 
   // === REFLECTION ===
   // Intensity: `pow(1 - h/dist3d, 5)` — geometric Schlick fresnel based purely on camera height

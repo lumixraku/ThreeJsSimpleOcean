@@ -149,7 +149,6 @@ function OceanLayer({
     // Big enough to cover the camera's horizon at ~15m altitude (~14 km on WGS84).
     // Coarse tessellation far out is fine — the shader's surface detail comes from tiling textures.
     const g = new THREE.PlaneGeometry(20000, 20000, 256, 256);
-    g.computeTangents();
     return g;
   }, []);
 
