@@ -152,6 +152,48 @@ Cost: a one-time GPU readback (~2–5ms at 128², ~3–10ms at 256², ~10–30ms
 - **Use a subtree, not the whole scene.** Pass only the geometry that should count as "land". Floors, skyboxes, props, etc. should be excluded.
 - **Skinned / animated meshes:** the bake uses `Object3D.clone(true)`. Rigid hierarchies and static meshes match the on-screen silhouette. **SkinnedMesh** clones may not reproduce the current animation pose (skeleton binding, bone matrices, and morph targets can differ from the live object), so the SDF silhouette can be wrong for animated characters or rigs. For shoreline foam, pass **static** land geometry (baked/rest pose, or a merged mesh). If you need a posed skinned mesh, bake from a dedicated static copy or merge the skinned result to a non-skinned mesh first.
 
+## Sky reflection
+
+The water reflects sky + clouds using two decoupled pieces — strength and content.
+
+**Strength: geometric Schlick fresnel** keyed off camera→water distance, not view direction:
+
+```glsl
+float h         = max(uCameraPos.y - vWorldPos.y, 0.0);   // camera height above water
+float dist3d    = length(uCameraPos - vWorldPos);          // 3D distance to the water point
+float fresInput = clamp(1.0 - h / dist3d, 0.0, 1.0);       // mathematically in [0, 1]
+float amount    = pow(fresInput, 5.0) * uFresnelStrength;
+```
+
+- Water directly below the camera (`dist3d == h`) → input `0` → transparent.
+- Water at the horizon (`dist3d → ∞`) → input → `1` → full mirror.
+- `pow(input, 5)` is naturally bounded in `[0, 1]`; **no clamp**, **no slope discontinuity**, so the gradient never produces a visible band/step. The strength is identical for any pair of water points at the same camera distance, regardless of yaw — so the reflection looks the same as you orbit 360°.
+
+**Content: screen-space reflection of the current frame.** Each frame the host renders the no-water scene to `uReflectionMap` (sky + clouds + island). The shader mirrors the screen UV across the projected horizon line and samples that texture, which puts the *actual* rendered clouds onto the water:
+
+```glsl
+// horizonUvY = projected screen-Y of the camera's horizontal forward direction
+vec2 reflectedUv = vec2(screenUv.x, 2.0 * horizonUvY - screenUv.y);
+reflectedUv.x   += n.x * 0.012;                                  // tiny lateral wave wobble
+vec3 reflectColor = texture2D(uReflectionMap, clamp(reflectedUv, 0.0, 1.0)).rgb;
+```
+
+Notes / gotchas:
+
+- The vertical UV is *not* perturbed by waves and the sample uses `clamp`, not edge fade. Pushing the UV down (or fading at the screen edges) would either land on the sea-floor strip of `uReflectionMap` or visibly cut the reflection at a screen-aligned boundary — both manifest as a horizontal black/seam line at the horizon.
+- `uReflectionMap` must be rendered without the water mesh (the demo's `Scene.tsx` does this on a layer toggle). If the water is in the reflection map, you get feedback artefacts.
+- The reflected *content* unavoidably depends on what's above the horizon in the current view (that's what SSR does); the **strength** is the part that stays uniform 360°.
+
+Tuning knobs (all on `OceanMaterialConfig` / exposed as uniforms):
+
+| Knob | Effect |
+|------|--------|
+| `fresnelStrength` | Global multiplier on the Schlick amount. `1.0` (default) is full mirror at horizon. |
+| `reflectionTint` | Currently unused at runtime (kept on the uniform bag for downstream forks that want a sky-tint fallback). |
+| `reflectionMaxDistance` / `reflectionDistanceRange` | Legacy knobs from the previous `pow(distance / maxDist, 5)` formulation, kept as no-op uniforms for backward compat. |
+
+If you want a flat tint instead of real clouds (e.g. for a distance-only stylised look) you can swap the `texture2D(uReflectionMap, …)` line for `uReflectionTint` — strength stays smooth and 360° uniform either way.
+
 ## Performance
 
 The render path is three passes per frame:
