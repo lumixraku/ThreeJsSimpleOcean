@@ -152,12 +152,10 @@ void main() {
   // *down* could land on the sea-floor strip of the SSR frame (uReflectionMap renders the scene
   // with no water), producing a dark stripe at the water's horizon line.
   reflectedUv.x += n.x * 0.012;
-  // 3-tap vertical blur sampling ONLY upward (away from horizon) so we never sample the floor
-  // band that sits below the SSR's horizon row. Smooths the cloud-density peak above horizon.
-  vec3 ssr0 = texture2D(uReflectionMap, clamp(reflectedUv, 0.0, 1.0)).rgb;
-  vec3 ssrUp1 = texture2D(uReflectionMap, clamp(reflectedUv + vec2(0.0, 0.04), 0.0, 1.0)).rgb;
-  vec3 ssrUp2 = texture2D(uReflectionMap, clamp(reflectedUv + vec2(0.0, 0.08), 0.0, 1.0)).rgb;
-  vec3 reflectColor = 0.3 * ssr0 + 0.4 * ssrUp1 + 0.3 * ssrUp2;
+  // Single SSR sample — earlier we did a 3-tap vertical blur to soften the bright cloud peak,
+  // but the Schlick curve is already smooth and the blur produced visible "ghost duplicates" of
+  // each cloud at different vertical offsets.
+  vec3 reflectColor = texture2D(uReflectionMap, clamp(reflectedUv, 0.0, 1.0)).rgb;
 
   vec3 surface = surfaceLit + specular;
 
