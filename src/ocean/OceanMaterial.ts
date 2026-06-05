@@ -51,6 +51,12 @@ export type OceanMaterialUniforms = {
   uSurfaceBrightness: THREE.IUniform<number>;
   uSpecStrength: THREE.IUniform<number>;
   uFresnelStrength: THREE.IUniform<number>;
+  /** World-space distance that maps to normalized distanceT == 1.0 for the reflection fade. */
+  uReflectionMaxDistance: THREE.IUniform<number>;
+  /** Smoothstep (start, end) for distanceT → reflection multiplier. e.g. (0.5, 0.8). */
+  uReflectionDistanceRange: THREE.IUniform<THREE.Vector2>;
+  /** Uniform sky-tint floor for the reflected color — guarantees a 360°-consistent reflection even when SSR sampling lands on dark sky. */
+  uReflectionTint: THREE.IUniform<THREE.Color>;
   uCameraNear: THREE.IUniform<number>;
   uCameraFar: THREE.IUniform<number>;
   uResolution: THREE.IUniform<THREE.Vector2>;
@@ -106,6 +112,16 @@ export type OceanMaterialConfig = {
   specStrength: number;
   /** Strength of fresnel rim at glancing angles. */
   fresnelStrength: number;
+  /** World-space distance that maps to normalized distanceT == 1.0 for the reflection fade. */
+  reflectionMaxDistance: number;
+  /** Smoothstep (start, end) over normalized distanceT controlling reflection ramp. */
+  reflectionDistanceRange: THREE.Vector2;
+  /**
+   * Uniform sky-tint floor for the reflected color. Used as `max(ssrSample, tint)` so the fresnel
+   * reads the same brightness at every camera yaw (SSR alone is screen-content-dependent and gives
+   * asymmetric reflection when clouds are clustered on one side of the sky).
+   */
+  reflectionTint: THREE.Color;
   /**
    * Optional baked shore distance field (see {@link buildShoreSdf}). When provided, the outer foam
    * follows the actual coastline of any geometry instead of an XZ AABB. Can also be set later via
@@ -156,7 +172,18 @@ const defaultConfig: OceanMaterialConfig = {
   depthTintAmount: 0.55,
   surfaceBrightness: 1.4,
   specStrength: 0.9,
+  // Geometric Schlick fresnel `pow(1 - h/dist3d, 5)` already asymptotes to 1 at the horizon
+  // without a hard clamp, so peak brightness is naturally bounded. We can run at full 1.0 again.
   fresnelStrength: 1.0,
+  // Saturation point of `pow(distanceT, 5)` lives at distanceT == 1 (world distance ==
+  // reflectionMaxDistance). The slope abruptly drops from 5 to 0 there, which is visible in
+  // screen space as a bright cloud band right where the reflection caps out. Setting this very
+  // large (150u) pushes that saturation point to within ~1.5° of the horizon — so close that
+  // the visible water sits entirely on the pow-curve's rising flank, with no plateau in view.
+  reflectionMaxDistance: 150,
+  reflectionDistanceRange: new THREE.Vector2(0.5, 0.8),
+  // Light horizon sky blue — matches the daytime atmosphere tone. Sets the 360°-uniform reflection floor.
+  reflectionTint: new THREE.Color(0.68, 0.8, 0.92),
 };
 
 /** Shared 1x1 black RGBA8 fallback for `uShoreSdf` — one GPU allocation for all ocean materials. */
@@ -246,6 +273,9 @@ export function createOceanMaterial(
     uSurfaceBrightness: { value: c.surfaceBrightness },
     uSpecStrength: { value: c.specStrength },
     uFresnelStrength: { value: c.fresnelStrength },
+    uReflectionMaxDistance: { value: c.reflectionMaxDistance },
+    uReflectionDistanceRange: { value: c.reflectionDistanceRange.clone() },
+    uReflectionTint: { value: c.reflectionTint.clone() },
     uCameraNear: { value: 0.1 },
     uCameraFar: { value: 200 },
     uResolution: { value: new THREE.Vector2(1, 1) },

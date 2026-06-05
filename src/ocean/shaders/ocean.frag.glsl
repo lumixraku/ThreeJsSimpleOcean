@@ -42,6 +42,9 @@ uniform float uDepthTintAmount; // max amount that depthT shifts color toward uD
 uniform float uSurfaceBrightness; // multiplier on the base texture's brightness
 uniform float uSpecStrength;
 uniform float uFresnelStrength;
+uniform float uReflectionMaxDistance; // world distance that maps to distanceT == 1.0
+uniform vec2 uReflectionDistanceRange; // (start, end) in normalized distanceT for the smoothstep fade
+uniform vec3 uReflectionTint;          // uniform 360° baseline sky-tint reflected on far water
 
 uniform float uCameraNear;
 uniform float uCameraFar;
@@ -118,28 +121,43 @@ void main() {
   float spec = pow(max(0.0, dot(R, viewDir)), 80.0);
   vec3 specular = vec3(spec) * uSpecStrength;
 
-  // Pure Schlick Fresnel reflection.
-  // Near camera (looking down at water) → dot(n,v) ≈ 1 → fres ≈ 0 → transparent.
-  // Near horizon (grazing angle)        → dot(n,v) ≈ 0 → fres ≈ 1 → reflects sky.
-  float fres = pow(1.0 - max(0.0, dot(n, viewDir)), 5.0);
-  float reflectionAmount = clamp(fres * uFresnelStrength, 0.0, 1.0);
+  // === REFLECTION ===
+  // Intensity: `pow(1 - h/dist3d, 5)` — geometric Schlick fresnel based purely on camera height
+  // above the water (h) and the 3D camera→water distance. This is x^5 of an input that is
+  // mathematically guaranteed to live in [0,1]:
+  //   - water directly below camera: h/dist3d == 1 → input == 0 → reflection == 0 (transparent)
+  //   - water at horizon: dist3d → ∞ → input → 1 → reflection → 1 (full mirror)
+  // So pow(input, 5) is in [0,1] WITHOUT any clamp at saturation — no slope-discontinuity, no
+  // visible band where the curve hits a cap. Strength is a pure function of (h, dist3d), not of
+  // view direction or screen position, so 360° camera yaw gives identical reflection per distance.
+  float h = max(uCameraPos.y - vWorldPos.y, 0.0);
+  float dist3d = max(length(uCameraPos - vWorldPos), 1e-4);
+  float fresInput = clamp(1.0 - h / dist3d, 0.0, 1.0);
+  float reflectionAmount = clamp(pow(fresInput, 5.0) * uFresnelStrength, 0.0, 1.0);
   float viewDistance = length(uCameraPos.xz - vWorldPos.xz);
 
-  // Screen-space reflection: mirror screen UV across the horizon line to sample the pre-water
-  // framebuffer (sky+clouds+island, no ocean feedback). Water pixels [0..horizonUvY] map to sky
-  // pixels [horizonUvY..2*horizonUvY], so water just below horizon reflects sky just above it,
-  // water at the camera's feet reflects high up in the sky.
+  // Content: mirror screen UV across the horizon line and sample the real rendered sky frame so
+  // the actual clouds appear in the water. No `onScreen` gate / smoothstep fade — those produced
+  // a visible horizontal seam where SSR cut over to the tint fallback. Instead we just `clamp` the
+  // UV: out-of-range mirrored samples take the nearest edge pixel of the SSR map, which is sky
+  // (the framebuffer's top row is always sky+clouds in this scene), so the visible result is
+  // continuous with no boundary.
   vec3 cameraForward = normalize((uInverseView * vec4(0.0, 0.0, -1.0, 0.0)).xyz);
   vec3 horizonForward = normalize(vec3(cameraForward.x, 0.0, cameraForward.z));
   vec4 horizonClip = projectionMatrix * uViewMatrix * vec4(horizonForward, 0.0);
   float horizonUvY = clamp((horizonClip.y / max(horizonClip.w, 1e-6)) * 0.5 + 0.5, 0.02, 0.98);
 
   vec2 reflectedUv = vec2(screenUv.x, 2.0 * horizonUvY - screenUv.y);
-  reflectedUv += n.xz * vec2(0.015, 0.03) * reflectionAmount;
-  vec2 edgeFade = smoothstep(0.0, 0.03, reflectedUv) * smoothstep(0.0, 0.03, 1.0 - reflectedUv);
-  reflectionAmount *= edgeFade.x * edgeFade.y;
-
-  vec3 reflectColor = texture2D(uReflectionMap, clamp(reflectedUv, 0.0, 1.0)).rgb;
+  // Tiny lateral wave wobble. Vertical perturbation is intentionally 0 — pushing reflectedUv
+  // *down* could land on the sea-floor strip of the SSR frame (uReflectionMap renders the scene
+  // with no water), producing a dark stripe at the water's horizon line.
+  reflectedUv.x += n.x * 0.012;
+  // 3-tap vertical blur sampling ONLY upward (away from horizon) so we never sample the floor
+  // band that sits below the SSR's horizon row. Smooths the cloud-density peak above horizon.
+  vec3 ssr0 = texture2D(uReflectionMap, clamp(reflectedUv, 0.0, 1.0)).rgb;
+  vec3 ssrUp1 = texture2D(uReflectionMap, clamp(reflectedUv + vec2(0.0, 0.04), 0.0, 1.0)).rgb;
+  vec3 ssrUp2 = texture2D(uReflectionMap, clamp(reflectedUv + vec2(0.0, 0.08), 0.0, 1.0)).rgb;
+  vec3 reflectColor = 0.3 * ssr0 + 0.4 * ssrUp1 + 0.3 * ssrUp2;
 
   vec3 surface = surfaceLit + specular;
 
