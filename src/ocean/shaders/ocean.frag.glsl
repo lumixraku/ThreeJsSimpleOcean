@@ -271,7 +271,12 @@ void main() {
   float transparencyDistance = smoothstep(4.0, 45.0, viewDistance);
   float alpha = mix(uShallowAlpha, uDeepAlpha, depthT);
   alpha = mix(alpha, 0.18, 1.0 - transparencyDistance);
-  alpha = mix(alpha, 0.94, reflectionAmount);
+  // Don't bind "high-reflection ↔ opaque" tightly. Pulling alpha all the way to 0.94 made the
+  // distant grazing-angle water look like a fluorescent sheet at dawn/dusk: a huge area of the
+  // screen rendered nearly opaque while reflecting the brightest part of the sky. Pulling toward
+  // 0.55 keeps the "mirror surface looks denser than transparent water" intuition without
+  // erasing every trace of the deep color underneath.
+  alpha = mix(alpha, 0.55, reflectionAmount);
   alpha = mix(alpha, 1.0, foam);
 
   gl_FragColor = vec4(color, clamp(alpha, 0.0, 1.0));
