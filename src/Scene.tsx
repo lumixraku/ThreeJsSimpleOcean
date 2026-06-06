@@ -586,8 +586,8 @@ function SceneContent() {
         )}
         <EffectComposer multisampling={0}>
           <Clouds
-            coverage={0.2}
-            qualityPreset="ultra"
+            coverage={0.12}
+            qualityPreset="high"
             turbulence={false}
             lightShafts={false}
             shapeDetail={false}
@@ -606,8 +606,8 @@ function SceneContent() {
               channel="r"
               altitude={1000}
               height={1000}
-              shapeAmount={0.8}
-              weatherExponent={0.6}
+              shapeAmount={0.55}
+              weatherExponent={1.6}
               densityScale={0.4}
               shadow
             />
@@ -615,16 +615,9 @@ function SceneContent() {
               channel="g"
               altitude={2000}
               height={800}
-              shapeAmount={0.8}
+              shapeAmount={0.4}
               shapeAlteringBias={0.5}
               densityScale={0.1}
-            />
-            <CloudLayer
-              channel="b"
-              altitude={2000}
-              height={2000}
-              densityScale={2e-3}
-              shapeAmount={0.3}
             />
           </Clouds>
           <AerialPerspective />
