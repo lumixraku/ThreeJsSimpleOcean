@@ -173,15 +173,17 @@ void main() {
   // runs past 1.0 for most foreground water. Clamping then samples the top row of the SSR frame
   // (which contains the mountain horizon silhouette) and smears that strip across the foreground.
   //
-  // Wide fade range [0.65, 1.05] so the SSR → tint transition spreads across most of the
-  // foreground water instead of forming a hard horizontal edge. The hard edge was very visible
-  // at dawn / sunset because the SSR sample near the horizon line is the brightest band in the
-  // sky (sun glow), while the tint is a flat blue — the brightness step then read as a thin
-  // bright "line on the water". Spreading the fade over 0.4 units blurs that step into a soft
-  // gradient.
+  // Wide fade range [0.65, 1.05] so the SSR → fallback transition spreads across most of the
+  // foreground water instead of forming a hard horizontal edge.
   float reflectInRange = 1.0 - smoothstep(0.65, 1.05, reflectedUv.y);
   vec3 ssrSample = texture2D(uReflectionMap, clamp(reflectedUv, 0.0, 1.0)).rgb;
-  vec3 reflectColor = mix(uReflectionTint, ssrSample, reflectInRange);
+  // Fallback color is sampled DYNAMICALLY from near the top of the no-water rendered frame at
+  // the same horizontal column. That way the SSR fade-out endpoint inherits whatever the actual
+  // sky color is right now — warm orange at dawn, light blue at noon, dark at night — instead
+  // of baking in a single hardcoded tint that fought every non-day scene. (`uReflectionTint`
+  // remains as a uniform for API back-compat but is no longer the fallback source.)
+  vec3 skyFallback = texture2D(uReflectionMap, vec2(clamp(reflectedUv.x, 0.0, 1.0), 0.92)).rgb;
+  vec3 reflectColor = mix(skyFallback, ssrSample, reflectInRange);
 
   vec3 surface = surfaceLit + specular;
 
