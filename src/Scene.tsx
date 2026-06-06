@@ -35,11 +35,7 @@ import {
   tagOceanDepthCasters,
 } from "./rendering/OceanDepthLayers";
 import { computeTileBoundsXZ } from "./stage/TileBounds";
-import {
-  loadGrassTile,
-  makeGrassPlaceholder,
-  type GrassLoadResult,
-} from "./stage/GrassTileLoader";
+import { buildSandBeach, type SandBeach } from "./stage/SandBeach";
 import { buildMountainRing } from "./stage/MountainRing";
 
 const WATER_Y = 1.5;
@@ -57,79 +53,35 @@ const SCENE_LATITUDE = 30;
 const SCENE_HEIGHT_M = 10;
 const SCENE_DATE = new Date("2025-06-01T16:00:00Z");
 
-function buildIslandLayout(template: THREE.Object3D): THREE.Object3D {
-  const TILE = 4;
-  const offsets: Array<[number, number]> = [
-    [0, 0],
-    [1, 0],
-    [0, 1],
-    [0, 2],
-    [1, 2],
-  ];
-  const group = new THREE.Group();
-  for (let i = 0; i < offsets.length; i++) {
-    const [tx, tz] = offsets[i];
-    const node = i === 0 ? template : template.clone(true);
-    const placement = new THREE.Group();
-    placement.position.set(tx * TILE, 0, tz * TILE);
-    placement.add(node);
-    group.add(placement);
-  }
-  const box = new THREE.Box3().setFromObject(group);
-  group.position.set(
-    -(box.min.x + box.max.x) * 0.5,
-    0,
-    -(box.min.z + box.max.z) * 0.5,
-  );
-  return group;
-}
-
-type SceneAssets = {
-  textures: OceanTextureBundle;
-  grass: GrassLoadResult;
-};
-
-function useSceneAssets(): SceneAssets | null {
-  const [assets, setAssets] = useState<SceneAssets | null>(null);
+function useOceanTextures(): OceanTextureBundle | null {
+  const [textures, setTextures] = useState<OceanTextureBundle | null>(null);
   useEffect(() => {
     let alive = true;
-    let loaded: SceneAssets | null = null;
+    let loaded: OceanTextureBundle | null = null;
     (async () => {
       const texLoader = new THREE.TextureLoader();
-      const textures = await loadOceanTextures(texLoader, AssetPaths.ocean, 4);
-      let grass: GrassLoadResult;
-      try {
-        grass = await loadGrassTile(AssetPaths.grass.model, {
-          baseColorUrl: AssetPaths.grass.baseColor,
-          normalUrl: AssetPaths.grass.normal,
-        });
-      } catch (e) {
-        console.warn("[Grass] FBX load failed, using placeholder box.", e);
-        grass = makeGrassPlaceholder();
-      }
-      loaded = { textures, grass };
-      if (alive) setAssets(loaded);
+      const bundle = await loadOceanTextures(texLoader, AssetPaths.ocean, 4);
+      loaded = bundle;
+      if (alive) setTextures(bundle);
       else {
-        grass.dispose();
-        textures.baseColor.dispose();
-        textures.normal.dispose();
-        textures.height.dispose();
-        textures.foamMask?.dispose();
+        bundle.baseColor.dispose();
+        bundle.normal.dispose();
+        bundle.height.dispose();
+        bundle.foamMask?.dispose();
       }
     })();
     return () => {
       alive = false;
-      // If StrictMode re-runs this effect after mount, dispose the previously-set assets.
+      // StrictMode re-runs the effect; dispose what was already set.
       if (loaded) {
-        loaded.grass.dispose();
-        loaded.textures.baseColor.dispose();
-        loaded.textures.normal.dispose();
-        loaded.textures.height.dispose();
-        loaded.textures.foamMask?.dispose();
+        loaded.baseColor.dispose();
+        loaded.normal.dispose();
+        loaded.height.dispose();
+        loaded.foamMask?.dispose();
       }
     };
   }, []);
-  return assets;
+  return textures;
 }
 
 function OceanLayer({
@@ -163,6 +115,12 @@ function OceanLayer({
       fresnelStrength: 1.0,
       shallowAlpha: 0.15,
       absorption: 1.0,
+      // Beefier surf line at the sand edge. The default 0.1m inner ring is invisible at this
+      // scene's camera distance; ~1.2m + wider outer patches reads as a proper breaking wave.
+      foamBaseRingWidth: 1.2,
+      foamWidth: 1.8,
+      foamStrength: 1.0,
+      foamMaskThreshold: 0.25,
     });
     r.uniforms.uIslandBounds.value.copy(computeTileBoundsXZ(islandRoot, 0));
     return r;
@@ -529,11 +487,9 @@ const ecef = new THREE.Vector3();
 function SceneContent() {
   const atmosphereRef = useRef<AtmosphereApi | null>(null);
   const atmosphereReadyRef = useRef(false);
-  const assets = useSceneAssets();
-  const islandRoot = useMemo(
-    () => (assets ? buildIslandLayout(assets.grass.root) : null),
-    [assets],
-  );
+  const oceanTextures = useOceanTextures();
+  const beach = useMemo<SandBeach>(() => buildSandBeach({ waterY: WATER_Y }), []);
+  useEffect(() => () => beach.dispose(), [beach]);
 
   // Push date + scene→ECEF frame into AtmosphereApi ONCE so Sky/SkyLight/SunLight/Clouds pick up
   // a stable transform. Rewriting worldToECEFMatrix every frame (as the three-clouds-demo does)
@@ -572,14 +528,14 @@ function SceneContent() {
         <SkyLight />
         <SunLight />
         <MountainHorizon />
-        {islandRoot && assets && (
+        {oceanTextures && (
           <>
-            <DepthCasterTag object={islandRoot} />
+            <DepthCasterTag object={beach.mesh} />
             <OceanFloor />
             <WaterPosts />
             <OceanLayer
-              textures={assets.textures}
-              islandRoot={islandRoot}
+              textures={oceanTextures}
+              islandRoot={beach.shoreProxy}
               atmosphereRef={atmosphereRef}
             />
           </>

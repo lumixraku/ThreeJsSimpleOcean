@@ -9,9 +9,4 @@ export const AssetPaths = {
     height: "/assets/textures/ocean/ocean_heightmap.png",
     foamMask: "/assets/textures/ocean/foam-mask.png",
   },
-  grass: {
-    model: "/assets/siegebound/models/terrain/grass/tile-grass.fbx",
-    baseColor: "/assets/siegebound/models/terrain/grass/tile-grass_basecolor.png",
-    normal: "/assets/siegebound/models/terrain/grass/tile-grass_normal.png",
-  },
 } as const;
