@@ -8,6 +8,10 @@ _Iteration log — dawn lighting + procedural sand beach (2026-06-06):_
 
 ![Dawn + sand beach iteration](docs/preview-dawn-beach.jpg)
 
+_Iteration log — softened reflection α + widened SSR fade (2026-06-06, evening):_
+
+![Softer dawn reflection](docs/preview-dawn-softrefl.jpg)
+
 This hasn't been tested with scale and has no underwater filters or anything.
 
 I just use a small amount in a fairly light game.
