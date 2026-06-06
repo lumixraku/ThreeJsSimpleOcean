@@ -171,10 +171,15 @@ void main() {
   // Out-of-range guard. The mirror trick only matches a real reflection while the camera is
   // ~level; once it tilts down, horizonUvY moves toward the top of the screen and reflectedUv.y
   // runs past 1.0 for most foreground water. Clamping then samples the top row of the SSR frame
-  // (which contains the mountain horizon silhouette) and smears that strip across the foreground
-  // as a banding artifact. Fade to the uniform sky tint where the sample would have to be clamped
-  // so the bad region just reads as a flat sky-blue instead of a smeared mountain.
-  float reflectInRange = 1.0 - smoothstep(0.95, 1.05, reflectedUv.y);
+  // (which contains the mountain horizon silhouette) and smears that strip across the foreground.
+  //
+  // Wide fade range [0.65, 1.05] so the SSR → tint transition spreads across most of the
+  // foreground water instead of forming a hard horizontal edge. The hard edge was very visible
+  // at dawn / sunset because the SSR sample near the horizon line is the brightest band in the
+  // sky (sun glow), while the tint is a flat blue — the brightness step then read as a thin
+  // bright "line on the water". Spreading the fade over 0.4 units blurs that step into a soft
+  // gradient.
+  float reflectInRange = 1.0 - smoothstep(0.65, 1.05, reflectedUv.y);
   vec3 ssrSample = texture2D(uReflectionMap, clamp(reflectedUv, 0.0, 1.0)).rgb;
   vec3 reflectColor = mix(uReflectionTint, ssrSample, reflectInRange);
 
