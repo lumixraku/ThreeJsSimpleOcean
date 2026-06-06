@@ -51,10 +51,11 @@ const OCEAN_RENDER_LAYER = 2;
 const SCENE_LONGITUDE = 0;
 const SCENE_LATITUDE = 30;
 const SCENE_HEIGHT_M = 10;
-// Late-afternoon sun. Pushed close to sunset so the atmosphere shader warms the horizon
-// and the ocean's `uSunColor` lerps toward the orange low-sun tint — matches the dusk
-// look from samtechcoded's recent ocean experiments.
-const SCENE_DATE = new Date("2025-06-01T18:30:00Z");
+// Low-angle morning sun: at lat 30 / lon 0 on June 1, 05:30Z puts the sun at azimuth ~75°
+// (ENE) and altitude ~12° — above the ~5° mountain horizon, in front of the default camera
+// (which looks at azimuth ~47°, NE). The sun disc renders inside the FOV and the atmosphere
+// shader still warms everything (warm low-sun lerp in OceanLayer's uSunColor).
+const SCENE_DATE = new Date("2025-06-01T05:30:00Z");
 
 function useOceanTextures(): OceanTextureBundle | null {
   const [textures, setTextures] = useState<OceanTextureBundle | null>(null);
