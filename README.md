@@ -4,6 +4,10 @@ Three.js **ocean surface** material: scrolling height and normal maps, depth-awa
 
 ![Demo screenshot](docs/preview.jpg)
 
+_Iteration log — dawn lighting + procedural sand beach (2026-06-06):_
+
+![Dawn + sand beach iteration](docs/preview-dawn-beach.jpg)
+
 This hasn't been tested with scale and has no underwater filters or anything.
 
 I just use a small amount in a fairly light game.
