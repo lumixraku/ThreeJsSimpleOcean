@@ -3,7 +3,6 @@ precision highp float;
 uniform mat4 modelMatrix;
 uniform mat4 modelViewMatrix;
 uniform mat4 projectionMatrix;
-uniform mat3 normalMatrix;
 
 uniform sampler2D uHeightMap;
 uniform float uTime;
@@ -17,7 +16,6 @@ attribute vec2 uv;
 
 varying vec2 vUv;
 varying vec3 vWorldPos;
-varying vec3 vWorldNormal;
 
 void main() {
   vUv = uv;
@@ -32,10 +30,7 @@ void main() {
   float disp = (h - 0.5) * 2.0 * uDisplacement;
   vec3 displaced = position + normal * disp;
 
-  vec4 world = modelMatrix * vec4(displaced, 1.0);
-  vWorldPos = world.xyz;
-
-  vWorldNormal = normalize(mat3(modelMatrix) * normal);
+  vWorldPos = (modelMatrix * vec4(displaced, 1.0)).xyz;
 
   gl_Position = projectionMatrix * modelViewMatrix * vec4(displaced, 1.0);
 }

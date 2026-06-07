@@ -55,7 +55,6 @@ uniform mat4 uInverseView;
 
 varying vec2 vUv;
 varying vec3 vWorldPos;
-varying vec3 vWorldNormal;
 
 vec3 reconstructWorldPos(vec2 screenUv, float depth) {
   vec4 ndc = vec4(screenUv * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
@@ -82,24 +81,25 @@ vec4 getWaterNoise(vec2 uv) {
   return n * 0.5 - 1.0;
 }
 
-/**
- * Base color stays on the existing two-layer cross-fade. The surface normal switches to the
- * canonical Water noise, driven by world XZ (so wavelength is locked to world units, not mesh
- * UV tessellation). The plane is flat — vWorldNormal is world up — so the noise vector is
- * already in a world-aligned basis and we skip the TBN transform.
- *
- * Swizzle .xzy maps the normal map's B-as-up tangent convention into world Y-up.
- * The (1.5, 1.0, 1.5) bias exaggerates the horizontal tilt the way official Water does.
- */
-void sampleSurface(out vec3 baseSample, out vec3 nWorld) {
+/** Two-layer cross-fade of the base color texture — hides UV tiling. */
+vec3 sampleBaseColor() {
   vec2 uvA = vUv * uSurfaceTiling + uTime * uAlbedoScroll;
   vec2 uvB = vUv * (uSurfaceTiling * 0.55) + uTime * uNormalScroll;
   vec3 baseA = texture2D(uBaseColor, uvA).rgb;
   vec3 baseB = texture2D(uBaseColor, uvB).rgb;
-  baseSample = mix(baseA, baseB, 0.5);
+  return mix(baseA, baseB, 0.5);
+}
 
+/**
+ * World-space surface normal from the Water noise. Driven by world XZ so wavelength is locked
+ * to world units (not mesh UV tessellation). The mesh is a flat plane, so the noise vector is
+ * already in a world-aligned basis — no TBN needed. `.xzy` maps the normal map's B-as-up
+ * tangent convention into world Y-up; `(1.5, 1.0, 1.5)` biases the horizontal tilt to match
+ * the official Water demo.
+ */
+vec3 sampleSurfaceNormal() {
   vec4 noise = getWaterNoise(vWorldPos.xz);
-  nWorld = normalize(vec3(noise.x, noise.z, noise.y) * vec3(1.5, 1.0, 1.5));
+  return normalize(vec3(noise.x, noise.z, noise.y) * vec3(1.5, 1.0, 1.5));
 }
 
 void main() {
@@ -114,10 +114,8 @@ void main() {
   float worldColumn = max(0.0, vWorldPos.y - floorWorld.y);
   float depthT = clamp(1.0 - exp(-worldColumn * uAbsorption), 0.0, 1.0);
 
-  // Two-layer surface sample (texture + normal sampled coherently within each layer).
-  vec3 baseSample;
-  vec3 n;
-  sampleSurface(baseSample, n);
+  vec3 baseSample = sampleBaseColor();
+  vec3 n = sampleSurfaceNormal();
 
   vec3 viewDir = normalize(uCameraPos - vWorldPos);
   vec3 lightDir = normalize(uLightDirWorld);
@@ -152,36 +150,27 @@ void main() {
   float reflectionAmount = clamp(pow(fresInput, 5.0) * uFresnelStrength, 0.0, 1.0);
   float viewDistance = length(uCameraPos.xz - vWorldPos.xz);
 
-  // Content: mirror screen UV across the horizon line and sample the real rendered sky frame so
-  // the actual clouds appear in the water. No `onScreen` gate / smoothstep fade — those produced
-  // a visible horizontal seam where SSR cut over to the tint fallback. Instead we just `clamp` the
-  // UV: out-of-range mirrored samples take the nearest edge pixel of the SSR map, which is sky
-  // (the framebuffer's top row is always sky+clouds in this scene), so the visible result is
-  // continuous with no boundary.
+  // Content: mirror the screen UV across the projected horizon line so each water pixel reads
+  // the rendered sky from the symmetric screen position. uReflectionMap is the no-water frame.
   vec3 cameraForward = normalize((uInverseView * vec4(0.0, 0.0, -1.0, 0.0)).xyz);
   vec3 horizonForward = normalize(vec3(cameraForward.x, 0.0, cameraForward.z));
   vec4 horizonClip = projectionMatrix * uViewMatrix * vec4(horizonForward, 0.0);
   float horizonUvY = clamp((horizonClip.y / max(horizonClip.w, 1e-6)) * 0.5 + 0.5, 0.02, 0.98);
 
-  vec2 reflectedUv = vec2(screenUv.x, 2.0 * horizonUvY - screenUv.y);
-  // Tiny lateral wave wobble. Vertical perturbation is intentionally 0 — pushing reflectedUv
-  // *down* could land on the sea-floor strip of the SSR frame (uReflectionMap renders the scene
-  // with no water), producing a dark stripe at the water's horizon line.
-  reflectedUv.x += n.x * 0.012;
-  // Out-of-range guard. The mirror trick only matches a real reflection while the camera is
-  // ~level; once it tilts down, horizonUvY moves toward the top of the screen and reflectedUv.y
-  // runs past 1.0 for most foreground water. Clamping then samples the top row of the SSR frame
-  // (which contains the mountain horizon silhouette) and smears that strip across the foreground.
+  // Lateral-only wave wobble. Pushing the V coord would land on the sea-floor strip of the
+  // SSR frame and produce a dark seam at the water's horizon line.
+  vec2 reflectedUv = vec2(screenUv.x + n.x * 0.012, 2.0 * horizonUvY - screenUv.y);
+
+  // When the camera tilts down, reflectedUv.y can exceed 1 (out of the SSR frame). A naive
+  // clamp would smear the top row — which contains the mountain horizon silhouette — across
+  // the foreground. Instead we fade to a dynamic sky color sampled from the top of the rendered
+  // frame at the same column, so the endpoint always inherits the current sky tone (warm at
+  // dawn, blue at noon, dark at night) instead of a hardcoded constant.
   //
-  // Wide fade range [0.65, 1.05] so the SSR → fallback transition spreads across most of the
-  // foreground water instead of forming a hard horizontal edge.
+  // Wide fade range [0.65, 1.05] spreads the transition across most of the foreground so there
+  // is no visible horizontal edge between "real reflection" and "fallback".
   float reflectInRange = 1.0 - smoothstep(0.65, 1.05, reflectedUv.y);
   vec3 ssrSample = texture2D(uReflectionMap, clamp(reflectedUv, 0.0, 1.0)).rgb;
-  // Fallback color is sampled DYNAMICALLY from near the top of the no-water rendered frame at
-  // the same horizontal column. That way the SSR fade-out endpoint inherits whatever the actual
-  // sky color is right now — warm orange at dawn, light blue at noon, dark at night — instead
-  // of baking in a single hardcoded tint that fought every non-day scene. (`uReflectionTint`
-  // remains as a uniform for API back-compat but is no longer the fallback source.)
   vec3 skyFallback = texture2D(uReflectionMap, vec2(clamp(reflectedUv.x, 0.0, 1.0), 0.92)).rgb;
   vec3 reflectColor = mix(skyFallback, ssrSample, reflectInRange);
 
@@ -211,60 +200,44 @@ void main() {
     distOutsideIsland = max(dx, dz);
   }
 
-  // ============================================================
-  // FOAM — two fully independent layers, combined with max().
-  // Inner ring: own width knob, no mask. Outer foam: own width knob, mask-gated.
-  // The two do not reference each other.
-  // ============================================================
+  // Two independent foam layers combined with max(): a thin solid inner ring at the actual
+  // water/land contact line, plus a wider mask-gated outer wash. Neither references the other.
 
-  // --- Inner ring (independent) ---
-  // Solid contact foam where the actual opaque mesh is close to the water surface.
-  // This hugs the visible shore mesh instead of drawing the island's rectangular XZ bounds.
-  //
-  // IMPORTANT: smoothstep(0, w, worldColumn) returns 0 for any worldColumn <= 0, meaning
-  // (1 - smoothstep(...)) = 1 over the ENTIRE band of "worldColumn ≈ 0" pixels regardless of w.
-  // The size of that band is set by depth-pass + rasterization, not the width knob — which is
-  // exactly why shrinking `foamBaseRingWidth` previously had no visible effect.
-  // Gating the strength by smoothstep(0, ε, w) makes width=0 → ring=0, and small widths fade
-  // proportionally so the visible ring shrinks AND dims as you decrease the knob.
+  // --- Inner ring ---
+  // `ringEnabled` gates the strength so foamBaseRingWidth=0 produces no ring at all. Without
+  // this, smoothstep(0, w, worldColumn) returns 0 for worldColumn ≤ 0 regardless of w, so
+  // shrinking the knob has no visible effect.
   float ringEnabled = smoothstep(0.0, 0.005, uFoamBaseRingWidth);
   float innerRing = ringEnabled * (1.0 - smoothstep(0.0, max(uFoamBaseRingWidth, 1e-6), worldColumn));
   innerRing = pow(innerRing, 0.7);
-  // Near-land gate: only show the contact ring where the SDF/AABB says we are close to real
-  // shore geometry. Without this, ANY shallow depth caster (e.g. a wooden post in open water)
-  // would inherit a foam ring at its waterline just because worldColumn is small there.
-  // distOutsideIsland is 0 at the shore and saturates at the SDF max distance far away.
+  // Suppress the contact ring on isolated depth casters (e.g. open-water posts) by gating on
+  // distance from the actual shore SDF/AABB.
   float nearLand = 1.0 - smoothstep(0.0, 0.5, distOutsideIsland);
   innerRing *= nearLand;
 
-  // --- Outer foam (independent) ---
-  // Foam mask: two scrolling world-XZ samples for non-tiling animated patches.
-  // The SDF owns shoreline placement; this mask only breaks up the wash pattern.
+  // --- Outer foam ---
+  // Two scrolling world-XZ samples of the foam mask, combined so the wash pattern doesn't tile.
   vec2 maskUvA = xz * uFoamMaskTiling + uTime * uFoamMaskScroll;
   vec2 maskUvB = xz * (uFoamMaskTiling * 1.35) + uTime * (uFoamMaskScroll * vec2(-0.7, 0.9));
   float maskRaw = max(texture2D(uFoamMask, maskUvA).r, texture2D(uFoamMask, maskUvB).r);
   float maskOuter = smoothstep(uFoamMaskThreshold, 1.0, maskRaw);
 
-  // Shape noise wobbles the outer silhouette only — procedural hash from shape UVs (no extra fetches).
-  // IMPORTANT: shape offset is expressed as a FRACTION of uFoamWidth, NOT absolute world units.
+  // Outer silhouette wobble — shape offset is a FRACTION of uFoamWidth, not absolute world units,
+  // so the rim disappears cleanly when foamWidth → 0.
   vec2 shapeSeedA = xz * uFoamShapeNoiseScale + uTime * uFoamShapeNoiseScroll;
   vec2 shapeSeedB = xz * (uFoamShapeNoiseScale * 0.62) + uTime * (uFoamShapeNoiseScroll * vec2(-1.3, 0.8));
   float shapeNoise = fract(sin(dot(shapeSeedA, vec2(12.9898, 78.233)) + dot(shapeSeedB, vec2(39.3468, 11.1355))) * 43758.5453);
   float shapeOffset = (shapeNoise - 0.5) * uFoamShapeNoiseAmount * uFoamWidth;
 
-  // Outer foam fades from an adjustable shore origin to 0 at (foamWidth + shapeOffset).
-  // A narrow unmasked SDF core keeps the visible shore continuous, while the wider wash is mask-gated.
-  // foamWidth is in absolute world units, independent of foamBaseRingWidth.
+  // Narrow unmasked SDF core keeps the visible shore continuous; the wider wash is mask-gated.
   float outerEnabled = smoothstep(0.0, 0.005, uFoamWidth);
   float shoreCoreWidth = max(uFoamWidth * 0.35, 1e-6);
   float shoreCore = outerEnabled * (1.0 - smoothstep(0.0, shoreCoreWidth, max(0.0, distOutsideIsland)));
   float outerDistance = max(0.0, distOutsideIsland + uFoamOuterShoreOffset);
   float outerReach = max(uFoamWidth + shapeOffset, 1e-4);
-  float outerFade = 1.0 - smoothstep(0.0, outerReach, outerDistance);
-  outerFade = pow(outerFade, 1.4);
+  float outerFade = pow(1.0 - smoothstep(0.0, outerReach, outerDistance), 1.4);
   float outerFoam = outerEnabled * max(shoreCore, outerFade * maskOuter);
 
-  // --- Combine: inner ring sits as a guaranteed solid floor; outer patches add on top. ---
   float foam = clamp(max(innerRing, outerFoam) * uFoamStrength, 0.0, 1.0);
   color = mix(color, vec3(0.96, 0.98, 1.0), foam);
 
