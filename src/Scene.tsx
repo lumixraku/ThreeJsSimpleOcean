@@ -10,7 +10,6 @@ import {
   SunLight,
   type AtmosphereApi,
 } from "@takram/three-atmosphere/r3f";
-import { CloudLayer, Clouds } from "@takram/three-clouds/r3f";
 import { Ellipsoid, Geodetic, radians } from "@takram/three-geospatial";
 import { ToneMappingMode } from "postprocessing";
 import * as THREE from "three";
@@ -37,6 +36,7 @@ import {
 import { computeTileBoundsXZ } from "./stage/TileBounds";
 import { buildSandBeach, type SandBeach } from "./stage/SandBeach";
 import { buildMountainRing } from "./stage/MountainRing";
+import { buildPainterlyClouds } from "./stage/PainterlyClouds";
 
 const WATER_Y = 1.5;
 const FLOOR_Y = -2.0;
@@ -46,6 +46,7 @@ const CAMERA_MIN_Y = WATER_Y + 0.6;
 const SUN_DAY = new THREE.Color(1.0, 0.96, 0.88);
 const SUN_NIGHT = new THREE.Color(0.06, 0.07, 0.1);
 const OCEAN_RENDER_LAYER = 2;
+const CLOUD_RENDER_LAYER = 3;
 
 // Anchor the scene origin onto the WGS84 ellipsoid so the atmosphere/sun math has a real frame.
 const SCENE_LONGITUDE = 0;
@@ -146,9 +147,9 @@ function OceanLayer({
     mesh.layers.set(OCEAN_RENDER_LAYER);
   }, []);
 
-  // Reflection map: framebuffer after the EffectComposer pass but before the ocean draw. The ocean
-  // mesh lives on OCEAN_RENDER_LAYER, so composer renders sky/clouds/island without water. We then
-  // copy that no-water frame for reflection and draw only the ocean layer on top.
+  // Reflection map: framebuffer after the EffectComposer pass (plus the cloud-band overlay) but
+  // before the ocean draw. The ocean mesh lives on OCEAN_RENDER_LAYER, so that frame holds
+  // sky/clouds/island without water. We copy it for reflection and draw the ocean layer on top.
   const reflectionRT = useMemo(
     () =>
       new THREE.WebGLRenderTarget(1, 1, {
@@ -187,8 +188,8 @@ function OceanLayer({
   // Step 1: render the no-water scene to reflectionRT. This forces GPU allocation of the texture
   // at the current size, dodging the "Offset overflows" crash that bare copyFramebufferToTexture
   // hits on the lazily-allocated 1×1 default.
-  // Step 2: copyFramebufferToTexture overlays the post-effects canvas FB (which DOES contain the
-  // clouds postprocessing pass) onto the now-allocated texture.
+  // Step 2: copyFramebufferToTexture overlays the post-effects canvas FB (which by then also
+  // contains the painterly cloud band drawn below) onto the now-allocated texture.
   useFrame((state) => {
     state.gl.getDrawingBufferSize(tmpSize);
     if (reflectionRT.width !== tmpSize.x || reflectionRT.height !== tmpSize.y) {
@@ -206,6 +207,13 @@ function OceanLayer({
     state.gl.setRenderTarget(reflectionRT);
     state.gl.render(scene, cam);
     state.gl.setRenderTarget(prevRT);
+
+    // Paint the cloud band over the composer output. Drawing it here (after AerialPerspective
+    // and tone mapping) keeps the painted colors literal — the atmosphere's inscatter would
+    // otherwise wash them out to white haze.
+    cam.layers.set(CLOUD_RENDER_LAYER);
+    state.gl.autoClear = false;
+    state.gl.render(scene, cam);
 
     // Now overlay the actual post-composer image (with clouds) on top.
     state.gl.copyFramebufferToTexture(reflectionRT.texture, new THREE.Vector2(0, 0));
@@ -346,6 +354,54 @@ function MountainHorizon() {
       ))}
     </group>
   );
+}
+
+function PainterlyCloudRing({
+  atmosphereRef,
+}: {
+  atmosphereRef: React.RefObject<AtmosphereApi | null>;
+}) {
+  const built = useMemo(
+    () =>
+      buildPainterlyClouds({
+        // Band bottom sits above the mountain silhouette as seen from the camera (~4.6° at
+        // 5.2 km): the cloud pass has no depth buffer on the canvas, so the mountains can't
+        // occlude it — the band must simply start higher than they reach.
+        radius: 9000,
+        baseY: 800,
+        height: 4200,
+        coverage: 0.52,
+        brightness: 1.0,
+      }),
+    [],
+  );
+  useEffect(() => {
+    built.mesh.layers.set(CLOUD_RENDER_LAYER);
+  }, [built]);
+  useEffect(() => () => built.dispose(), [built]);
+
+  // Cloud colors are authored as final (post-tonemap) values, so day/night is a plain
+  // brightness ramp; the hue still warms at low sun via uSunColor (slower ×2 day ramp than
+  // the ocean's, keeping sunrise/sunset clouds pink for longer).
+  useFrame((_, dt) => {
+    built.uniforms.uTime.value += dt;
+    const atm = atmosphereRef.current;
+    const sunDir = (atm as { sunDirection?: THREE.Vector3 } | null)?.sunDirection;
+    if (sunDir) {
+      built.uniforms.uSunDirection.value.copy(sunDir);
+      const day = THREE.MathUtils.clamp(sunDir.y * 2, 0, 1);
+      built.uniforms.uSunColor.value
+        .setRGB(1.0, 0.62, 0.45)
+        .lerp(SUN_DAY, day);
+      built.uniforms.uBrightness.value = THREE.MathUtils.clamp(
+        sunDir.y * 5 + 0.4,
+        0.08,
+        1.0,
+      );
+    }
+  });
+
+  return <primitive object={built.mesh} />;
 }
 
 function WaterPosts() {
@@ -495,12 +551,9 @@ function SceneContent() {
   const beach = useMemo<SandBeach>(() => buildSandBeach({ waterY: WATER_Y }), []);
   useEffect(() => () => beach.dispose(), [beach]);
 
-  // Push date + scene→ECEF frame into AtmosphereApi ONCE so Sky/SkyLight/SunLight/Clouds pick up
-  // a stable transform. Rewriting worldToECEFMatrix every frame (as the three-clouds-demo does)
-  // invalidates the volumetric cloud temporal accumulation — the TAA reprojection treats the
-  // mutated matrix as a camera transform change and rejects history every frame, leaving the
-  // Bayer dither pattern visible as static sparkle around cloud edges. We use a ref guard
-  // (instead of useEffect) so we don't race the <Atmosphere> ref population.
+  // Push date + scene→ECEF frame into AtmosphereApi ONCE so Sky/SkyLight/SunLight pick up a
+  // stable transform. We use a ref guard (instead of useEffect) so we don't race the
+  // <Atmosphere> ref population.
   useFrame(() => {
     if (atmosphereReadyRef.current) return;
     const atm = atmosphereRef.current;
@@ -544,42 +597,8 @@ function SceneContent() {
             />
           </>
         )}
+        <PainterlyCloudRing atmosphereRef={atmosphereRef} />
         <EffectComposer multisampling={0}>
-          <Clouds
-            coverage={0.12}
-            qualityPreset="high"
-            turbulence={false}
-            lightShafts={false}
-            shapeDetail={false}
-            haze={false}
-            powderScale={0}
-            skyLightScale={3.5}
-            scatterAnisotropy1={0.4}
-            scatterAnisotropyMix={0.7}
-            localWeatherVelocity={[0.00133, 0]}
-            shapeVelocity={[0.002, 0, 0.000667]}
-            shapeDetailVelocity={[0.003, 0, 0.001]}
-            shadow-maxFar={1e5}
-            disableDefaultLayers
-          >
-            <CloudLayer
-              channel="r"
-              altitude={1000}
-              height={1000}
-              shapeAmount={0.55}
-              weatherExponent={1.6}
-              densityScale={0.4}
-              shadow
-            />
-            <CloudLayer
-              channel="g"
-              altitude={2000}
-              height={800}
-              shapeAmount={0.4}
-              shapeAlteringBias={0.5}
-              densityScale={0.1}
-            />
-          </Clouds>
           <AerialPerspective />
           <ToneMapping mode={ToneMappingMode.ACES_FILMIC} />
         </EffectComposer>
