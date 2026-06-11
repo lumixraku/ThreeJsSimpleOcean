@@ -57,6 +57,8 @@ export type OceanMaterialUniforms = {
   uReflectionDistanceRange: THREE.IUniform<THREE.Vector2>;
   /** Uniform sky-tint floor for the reflected color — guarantees a 360°-consistent reflection even when SSR sampling lands on dark sky. */
   uReflectionTint: THREE.IUniform<THREE.Color>;
+  /** World → planar-reflection UV (projective). See rendering/PlanarReflection.ts. */
+  uMirrorMatrix: THREE.IUniform<THREE.Matrix4>;
   uCameraNear: THREE.IUniform<number>;
   uCameraFar: THREE.IUniform<number>;
   uResolution: THREE.IUniform<THREE.Vector2>;
@@ -276,6 +278,7 @@ export function createOceanMaterial(
     uReflectionMaxDistance: { value: c.reflectionMaxDistance },
     uReflectionDistanceRange: { value: c.reflectionDistanceRange.clone() },
     uReflectionTint: { value: c.reflectionTint.clone() },
+    uMirrorMatrix: { value: new THREE.Matrix4() },
     uCameraNear: { value: 0.1 },
     uCameraFar: { value: 200 },
     uResolution: { value: new THREE.Vector2(1, 1) },

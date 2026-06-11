@@ -4,9 +4,6 @@ uniform vec3 uCameraPos;
 uniform vec3 uLightDirWorld;
 uniform vec3 uSunColor;
 
-uniform mat4 uViewMatrix;
-uniform mat4 projectionMatrix;
-
 uniform sampler2D uBaseColor;
 uniform sampler2D uNormalMap;
 uniform sampler2D uSceneDepth;
@@ -55,6 +52,7 @@ uniform mat4 uInverseView;
 
 varying vec2 vUv;
 varying vec3 vWorldPos;
+varying vec4 vMirrorCoord;
 
 vec3 reconstructWorldPos(vec2 screenUv, float depth) {
   vec4 ndc = vec4(screenUv * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
@@ -141,54 +139,30 @@ void main() {
   vec3 specular = uSunColor * (2.0 * spec * uSpecStrength);
 
   // === REFLECTION ===
-  // Intensity: `pow(1 - h/dist3d, 5)` — geometric Schlick fresnel based purely on camera height
-  // above the water (h) and the 3D camera→water distance. This is x^5 of an input that is
+  // Intensity: full Schlick, `F0 + (1 - F0) * pow(1 - h/dist3d, 5)`, based purely on camera
+  // height above the water (h) and the 3D camera→water distance. h/dist3d is the cosine of the
+  // incidence angle from the surface normal, so the shape term is x^5 of an input that is
   // mathematically guaranteed to live in [0,1]:
-  //   - water directly below camera: h/dist3d == 1 → input == 0 → reflection == 0 (transparent)
+  //   - water directly below camera: h/dist3d == 1 → shape term 0 → reflection == F0 (faint)
   //   - water at horizon: dist3d → ∞ → input → 1 → reflection → 1 (full mirror)
-  // So pow(input, 5) is in [0,1] WITHOUT any clamp at saturation — no slope-discontinuity, no
-  // visible band where the curve hits a cap. Strength is a pure function of (h, dist3d), not of
-  // view direction or screen position, so 360° camera yaw gives identical reflection per distance.
+  // The F0 base term matters: without it, raising the camera crushes the x^5 term to zero and
+  // ALL reflections vanish from elevated views. Real water keeps ~2% reflectance at normal
+  // incidence; we use a slightly higher stylized base so it stays readable.
+  // Strength is a pure function of (h, dist3d), not of view direction or screen position, so
+  // 360° camera yaw gives identical reflection per distance.
   float h = max(uCameraPos.y - vWorldPos.y, 0.0);
   float dist3d = max(length(uCameraPos - vWorldPos), 1e-4);
   float fresInput = clamp(1.0 - h / dist3d, 0.0, 1.0);
-  float reflectionAmount = clamp(pow(fresInput, 5.0) * uFresnelStrength, 0.0, 1.0);
+  float reflectionAmount =
+    clamp((0.08 + 0.92 * pow(fresInput, 5.0)) * uFresnelStrength, 0.0, 1.0);
   float viewDistance = length(uCameraPos.xz - vWorldPos.xz);
 
-  // Content: mirror the screen UV across the projected horizon line so each water pixel reads
-  // the rendered sky from the symmetric screen position. uReflectionMap is the no-water frame.
-  vec3 cameraForward = normalize((uInverseView * vec4(0.0, 0.0, -1.0, 0.0)).xyz);
-  vec3 horizonForward = normalize(vec3(cameraForward.x, 0.0, cameraForward.z));
-  vec4 horizonClip = projectionMatrix * uViewMatrix * vec4(horizonForward, 0.0);
-  float horizonUvY = clamp((horizonClip.y / max(horizonClip.w, 1e-6)) * 0.5 + 0.5, 0.02, 0.98);
-
-  // Lateral-only wave wobble. Pushing the V coord would land on the sea-floor strip of the
-  // SSR frame and produce a dark seam at the water's horizon line.
-  vec2 reflectedUv = vec2(screenUv.x + n.x * 0.012, 2.0 * horizonUvY - screenUv.y);
-
-  // When the camera tilts down, reflectedUv.y can exceed 1 (out of the SSR frame). A naive
-  // clamp would smear the top row — which contains the mountain horizon silhouette — across
-  // the foreground. Instead we fade to a dynamic sky tone so the endpoint always inherits the
-  // current sky (warm at dawn, blue at noon, dark at night) instead of a hardcoded constant.
-  //
-  // The fallback must be COLUMN-INDEPENDENT: any per-column row sample turns that row's
-  // horizontal structure (clouds at a fixed top row, mountains/sun glow near the horizon row)
-  // into vertical light/dark bars smeared down the foreground water. Averaging a spread of
-  // taps across one near-horizon row yields a single flat tone, so bars cannot form.
-  //
-  // Wide fade range [0.6, 1.0] spreads the transition across most of the foreground so there
-  // is no visible horizontal edge between "real reflection" and "fallback". The fade must end
-  // AT 1.0: past it the clamped ssr sample degenerates to the frame's literal top row, which
-  // would re-introduce per-column (vertical bar) structure from the clouds.
-  float reflectInRange = 1.0 - smoothstep(0.6, 1.0, reflectedUv.y);
-  float fallbackY = min(horizonUvY + 0.05, 0.98);
-  vec3 ssrSample = texture2D(uReflectionMap, clamp(reflectedUv, 0.0, 1.0)).rgb;
-  vec3 skyFallback = vec3(0.0);
-  for (int i = 0; i < 5; i++) {
-    skyFallback += texture2D(uReflectionMap, vec2(0.1 + 0.2 * float(i), fallbackY)).rgb;
-  }
-  skyFallback *= 0.2;
-  vec3 reflectColor = mix(skyFallback, ssrSample, reflectInRange);
+  // Content: true planar reflection — the scene rendered from a camera mirrored across the
+  // water plane (see PlanarReflection.ts), valid at any camera angle. Projective sampling of
+  // vMirrorCoord; the wave normal perturbs the UV for surface distortion.
+  vec2 mirrorUv = vMirrorCoord.xy / max(vMirrorCoord.w, 1e-6);
+  mirrorUv = clamp(mirrorUv + n.xz * 0.02, 0.0, 1.0);
+  vec3 reflectColor = texture2D(uReflectionMap, mirrorUv).rgb;
 
   vec3 surface = surfaceLit + specular;
 

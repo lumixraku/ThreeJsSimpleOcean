@@ -9,6 +9,7 @@ uniform float uTime;
 uniform vec2 uHeightScroll;
 uniform float uHeightTiling;
 uniform float uDisplacement;
+uniform mat4 uMirrorMatrix; // world → planar-reflection UV (projective)
 
 attribute vec3 position;
 attribute vec3 normal;
@@ -16,6 +17,7 @@ attribute vec2 uv;
 
 varying vec2 vUv;
 varying vec3 vWorldPos;
+varying vec4 vMirrorCoord;
 
 void main() {
   vUv = uv;
@@ -31,6 +33,7 @@ void main() {
   vec3 displaced = position + normal * disp;
 
   vWorldPos = (modelMatrix * vec4(displaced, 1.0)).xyz;
+  vMirrorCoord = uMirrorMatrix * vec4(vWorldPos, 1.0);
 
   gl_Position = projectionMatrix * modelViewMatrix * vec4(displaced, 1.0);
 }

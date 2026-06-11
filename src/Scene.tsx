@@ -28,6 +28,7 @@ import {
 } from "./ocean/OceanMaterial";
 import { buildShoreSdf, type ShoreSdf } from "./ocean/ShoreSdf";
 import { DepthPrePassTarget } from "./rendering/DepthPrePassTarget";
+import { PlanarReflection } from "./rendering/PlanarReflection";
 import { getDepthPrePassMaterial } from "./rendering/DepthPrePassMaterial";
 import {
   OCEAN_DEPTH_CASTER_LAYER,
@@ -117,7 +118,7 @@ function OceanLayer({
       albedoScroll: new THREE.Vector2(0.0012, 0.0008),
       normalScroll: new THREE.Vector2(-0.0007, 0.0011),
       specStrength: 0.3,
-      fresnelStrength: 1.0,
+      fresnelStrength: 1.4,
       shallowAlpha: 0.15,
       absorption: 1.0,
       // Beefier surf line at the sand edge. The default 0.1m inner ring is invisible at this
@@ -147,27 +148,15 @@ function OceanLayer({
     mesh.layers.set(OCEAN_RENDER_LAYER);
   }, []);
 
-  // Reflection map: framebuffer after the EffectComposer pass (plus the cloud-band overlay) but
-  // before the ocean draw. The ocean mesh lives on OCEAN_RENDER_LAYER, so that frame holds
-  // sky/clouds/island without water. We copy it for reflection and draw the ocean layer on top.
-  const reflectionRT = useMemo(
-    () =>
-      new THREE.WebGLRenderTarget(1, 1, {
-        minFilter: THREE.LinearFilter,
-        magFilter: THREE.LinearFilter,
-        format: THREE.RGBAFormat,
-        type: THREE.UnsignedByteType,
-        generateMipmaps: false,
-        depthBuffer: false,
-        stencilBuffer: false,
-      }),
-    [],
-  );
+  // True planar reflection: the scene rendered each frame from a camera mirrored across the
+  // water plane (HDR pass → ACES tonemap → cloud overlay, see PlanarReflection). Valid at any
+  // camera angle — the previous screen-space mirror ran out of data as soon as the camera rose.
+  const planarReflection = useMemo(() => new PlanarReflection(WATER_Y), []);
 
   useEffect(() => {
-    setOceanReflectionMap(uniforms, reflectionRT.texture);
+    setOceanReflectionMap(uniforms, planarReflection.texture);
     return () => setOceanReflectionMap(uniforms, null);
-  }, [uniforms, reflectionRT]);
+  }, [uniforms, planarReflection]);
 
   useEffect(
     () => () => {
@@ -175,38 +164,25 @@ function OceanLayer({
       material.dispose();
       depthPass.dispose();
       shoreSdf.dispose();
-      reflectionRT.dispose();
+      planarReflection.dispose();
     },
-    [geometry, material, depthPass, shoreSdf, reflectionRT],
+    [geometry, material, depthPass, shoreSdf, planarReflection],
   );
 
   const tmpSize = useMemo(() => new THREE.Vector2(), []);
 
-  // Priority 2 runs AFTER the EffectComposer (priority 1). Build a reflection map of the
-  // post-composer frame (sky + clouds + island, no water) and then render the ocean on top.
-  //
-  // Step 1: render the no-water scene to reflectionRT. This forces GPU allocation of the texture
-  // at the current size, dodging the "Offset overflows" crash that bare copyFramebufferToTexture
-  // hits on the lazily-allocated 1×1 default.
-  // Step 2: copyFramebufferToTexture overlays the post-effects canvas FB (which by then also
-  // contains the painterly cloud band drawn below) onto the now-allocated texture.
+  // Priority 2 runs AFTER the EffectComposer (priority 1): render the reflection, overlay the
+  // cloud band on the canvas, then draw the ocean on top.
   useFrame((state) => {
     state.gl.getDrawingBufferSize(tmpSize);
-    if (reflectionRT.width !== tmpSize.x || reflectionRT.height !== tmpSize.y) {
-      reflectionRT.setSize(tmpSize.x, tmpSize.y);
-    }
+    planarReflection.setSize(tmpSize.x, tmpSize.y, 0.5);
 
     const cam = state.camera as THREE.PerspectiveCamera;
     const prevLayers = cam.layers.mask;
     const prevAutoClear = state.gl.autoClear;
-    const prevRT = state.gl.getRenderTarget();
 
-    // Force-allocate the texture at the right size by rendering anything to it.
-    cam.layers.disable(OCEAN_RENDER_LAYER);
-    state.gl.autoClear = true;
-    state.gl.setRenderTarget(reflectionRT);
-    state.gl.render(scene, cam);
-    state.gl.setRenderTarget(prevRT);
+    planarReflection.render(state.gl, scene, cam, CLOUD_RENDER_LAYER);
+    uniforms.uMirrorMatrix.value.copy(planarReflection.textureMatrix);
 
     // Paint the cloud band over the composer output. Drawing it here (after AerialPerspective
     // and tone mapping) keeps the painted colors literal — the atmosphere's inscatter would
@@ -215,12 +191,8 @@ function OceanLayer({
     state.gl.autoClear = false;
     state.gl.render(scene, cam);
 
-    // Now overlay the actual post-composer image (with clouds) on top.
-    state.gl.copyFramebufferToTexture(reflectionRT.texture, new THREE.Vector2(0, 0));
-
     // Render just the ocean layer on top of the canvas backbuffer.
     cam.layers.set(OCEAN_RENDER_LAYER);
-    state.gl.autoClear = false;
     try {
       state.gl.render(scene, cam);
     } finally {
