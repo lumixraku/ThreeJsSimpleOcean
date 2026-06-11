@@ -168,15 +168,26 @@ void main() {
 
   // When the camera tilts down, reflectedUv.y can exceed 1 (out of the SSR frame). A naive
   // clamp would smear the top row — which contains the mountain horizon silhouette — across
-  // the foreground. Instead we fade to a dynamic sky color sampled from the top of the rendered
-  // frame at the same column, so the endpoint always inherits the current sky tone (warm at
-  // dawn, blue at noon, dark at night) instead of a hardcoded constant.
+  // the foreground. Instead we fade to a dynamic sky tone so the endpoint always inherits the
+  // current sky (warm at dawn, blue at noon, dark at night) instead of a hardcoded constant.
   //
-  // Wide fade range [0.65, 1.05] spreads the transition across most of the foreground so there
-  // is no visible horizontal edge between "real reflection" and "fallback".
-  float reflectInRange = 1.0 - smoothstep(0.65, 1.05, reflectedUv.y);
+  // The fallback must be COLUMN-INDEPENDENT: any per-column row sample turns that row's
+  // horizontal structure (clouds at a fixed top row, mountains/sun glow near the horizon row)
+  // into vertical light/dark bars smeared down the foreground water. Averaging a spread of
+  // taps across one near-horizon row yields a single flat tone, so bars cannot form.
+  //
+  // Wide fade range [0.6, 1.0] spreads the transition across most of the foreground so there
+  // is no visible horizontal edge between "real reflection" and "fallback". The fade must end
+  // AT 1.0: past it the clamped ssr sample degenerates to the frame's literal top row, which
+  // would re-introduce per-column (vertical bar) structure from the clouds.
+  float reflectInRange = 1.0 - smoothstep(0.6, 1.0, reflectedUv.y);
+  float fallbackY = min(horizonUvY + 0.05, 0.98);
   vec3 ssrSample = texture2D(uReflectionMap, clamp(reflectedUv, 0.0, 1.0)).rgb;
-  vec3 skyFallback = texture2D(uReflectionMap, vec2(clamp(reflectedUv.x, 0.0, 1.0), 0.92)).rgb;
+  vec3 skyFallback = vec3(0.0);
+  for (int i = 0; i < 5; i++) {
+    skyFallback += texture2D(uReflectionMap, vec2(0.1 + 0.2 * float(i), fallbackY)).rgb;
+  }
+  skyFallback *= 0.2;
   vec3 reflectColor = mix(skyFallback, ssrSample, reflectInRange);
 
   vec3 surface = surfaceLit + specular;
