@@ -107,8 +107,13 @@ void main() {
 
   // Reconstruct world position of underwater geometry behind this pixel.
   float sceneDepth = texture2D(uSceneDepth, screenUv).r;
-  if (sceneDepth + 0.0002 < gl_FragCoord.z) discard;
   vec3 floorWorld = reconstructWorldPos(screenUv, sceneDepth);
+
+  // Occlusion test in WORLD units. A raw-depth epsilon here (old: sceneDepth + 0.0002 <
+  // gl_FragCoord.z) is NOT angle-safe with this near/far range: it expands to ~0.002·d² m of
+  // slack, so from a high camera the whole dry island read as "behind the water" and the
+  // contact-foam ring flooded it. A constant 5 cm along the view ray is what the bias meant.
+  if (distance(uCameraPos, floorWorld) + 0.05 < distance(uCameraPos, vWorldPos)) discard;
 
   // World-space water column (angle-independent).
   float worldColumn = max(0.0, vWorldPos.y - floorWorld.y);
