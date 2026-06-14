@@ -178,22 +178,21 @@
     }
     terrainGeo.computeVertexNormals();
 
-    // per-vertex color by height + slope (snow on high flat ground)
+    // per-vertex color: sandy shore -> green grass -> rock on steep faces (green islands, no snow)
     const colors = new Float32Array(pos.count * 3);
     const nrm = terrainGeo.attributes.normal;
-    const cRock = new THREE.Color(0xdfe2e6); // bright cool grey for the steepest cliffs
-    const cRockHi = new THREE.Color(0xeef0f3);
-    const cSand = new THREE.Color(0xd5dfe0); // pale icy shore, reads turquoise under water
-    const cSnow = new THREE.Color(0xf6f8ff);
+    const cSand = new THREE.Color(0xd8cb9a);  // beach sand at the waterline
+    const cGrass = new THREE.Color(0x5a9e44);  // grass
+    const cGrassHi = new THREE.Color(0x76b557); // lighter grass higher up
+    const cRock = new THREE.Color(0x9b9384);   // rock on steep faces
     const tmp = new THREE.Color();
     for (let i = 0; i < pos.count; i++) {
       const y = pos.getY(i);
       const slope = nrm.getY(i); // 1 flat, 0 vertical
-      tmp.copy(cRock).lerp(cRockHi, smoothstep(2, 26, y));
-      // snow blankets everything down to the waterline except the very steepest cliffs
-      const snow = Math.min(1, smoothstep(-1, 5, y) * smoothstep(0.22, 0.5, slope) + smoothstep(20, 36, y));
-      tmp.lerp(cSnow, snow);
-      tmp.lerp(cSand, smoothstep(3, -3, y)); // shoreline + bed -> pale
+      // grass on gentle slopes, rock on steep ones
+      tmp.copy(cRock).lerp(cGrass, smoothstep(0.55, 0.82, slope));
+      tmp.lerp(cGrassHi, smoothstep(18, 55, y) * 0.5); // a touch lighter with elevation
+      tmp.lerp(cSand, smoothstep(3.5, -2, y)); // sandy beach near the waterline
       colors[i * 3] = tmp.r; colors[i * 3 + 1] = tmp.g; colors[i * 3 + 2] = tmp.b;
     }
     terrainGeo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
@@ -202,6 +201,47 @@
       new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0 })
     );
     scene.add(terrain);
+
+    // ---------- trees on both islands ----------
+    const trunkMat = new THREE.MeshStandardMaterial({ color: 0x6b4a2b, roughness: 1 });
+    const leafMat = new THREE.MeshStandardMaterial({ color: 0x2f7d3a, roughness: 1 });
+    const trunkGeo = new THREE.CylinderGeometry(0.22, 0.4, 2.2, 5);
+    const coneGeoLo = new THREE.ConeGeometry(1.5, 3.0, 7);
+    const coneGeoHi = new THREE.ConeGeometry(1.1, 2.4, 7);
+    function makeTree() {
+      const g = new THREE.Group();
+      const trunk = new THREE.Mesh(trunkGeo, trunkMat); trunk.position.y = 1.1;
+      const f1 = new THREE.Mesh(coneGeoLo, leafMat); f1.position.y = 3.2;
+      const f2 = new THREE.Mesh(coneGeoHi, leafMat); f2.position.y = 4.7;
+      g.add(trunk, f1, f2);
+      return g;
+    }
+    // approximate ground steepness via finite differences of the height field
+    function slopeAt(x, z) {
+      const e = 2.0;
+      const dx = height(x + e, z) - height(x - e, z);
+      const dz = height(x, z + e) - height(x, z - e);
+      return Math.hypot(dx, dz) / (2 * e);
+    }
+    function scatterTrees(c, count, scaleMin, scaleMax, maxY) {
+      let placed = 0, tries = 0;
+      while (placed < count && tries < count * 8) {
+        tries++;
+        const a = Math.random() * Math.PI * 2;
+        const r = Math.sqrt(Math.random()) * c.r * 0.82;
+        const x = c.x + Math.cos(a) * r, z = c.z + Math.sin(a) * r;
+        const h = height(x, z);
+        if (h < 1.5 || h > maxY || slopeAt(x, z) > 0.9) continue; // skip water, peaks, cliffs
+        const t = makeTree();
+        t.scale.setScalar(scaleMin + Math.random() * (scaleMax - scaleMin));
+        t.position.set(x, h - 0.4, z);
+        t.rotation.y = Math.random() * Math.PI * 2;
+        scene.add(t);
+        placed++;
+      }
+    }
+    scatterTrees(ISLE, 26, 1.0, 1.9, 40);      // near island: many small trees
+    scatterTrees(MTN, 70, 3.5, 6.5, 55);        // far massif: fewer, larger so they read at distance
 
     // ---------- water: official three.js Water (ocean shader) ----------
     const waterNormals = new THREE.TextureLoader().load(
@@ -216,7 +256,7 @@
       sunDirection: sunDir.clone(),
       sunColor: 0xfff6e2,
       waterColor: 0x33707e, // turquoise lake
-      distortionScale: 0.35, // gentle ripples -> near-still lake
+      distortionScale: 0.08, // small but visibly moving ripples
       fog: scene.fog !== undefined,
     });
     water.rotation.x = -Math.PI / 2;
@@ -226,7 +266,7 @@
 
     // ---------- loop ----------
     function tick() {
-      water.material.uniforms['time'].value += 1.0 / 240.0; // slow drift for a calm surface
+      water.material.uniforms['time'].value += 1.0 / 60.0; // lively drift, but small waves
       sky.material.uniforms.time.value += 1.0 / 60.0;
       controls.update();
       renderer.render(scene, camera);
